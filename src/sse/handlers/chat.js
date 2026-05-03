@@ -25,6 +25,34 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
  * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
  * Format detection and translation handled by translator
  */
+export async function handleInternalWarmupChat(request, clientRawRequest = null) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    log.warn("CHAT", "Invalid JSON body");
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
+  }
+
+  const modelStr = body.model;
+  if (!modelStr) {
+    log.warn("CHAT", "Missing model");
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
+  }
+
+  if (!clientRawRequest) {
+    const url = new URL(request.url);
+    clientRawRequest = {
+      endpoint: url.pathname,
+      body,
+      headers: Object.fromEntries(request.headers.entries())
+    };
+  }
+
+  cacheClaudeHeaders(clientRawRequest.headers);
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, null);
+}
+
 export async function handleChat(request, clientRawRequest = null) {
   let body;
   try {
@@ -157,6 +185,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
+  const preferredConnectionId = request?.headers?.get("x-9router-connection-id") || null;
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
@@ -164,7 +193,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {

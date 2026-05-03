@@ -1,7 +1,9 @@
 import https from "https";
-import pkg from "../../../../package.json" with { type: "json" };
+import { UPDATER_CONFIG } from "@/shared/constants/config";
 
-const NPM_PACKAGE_NAME = "9router";
+const CURRENT_VERSION = process.env.APP_VERSION || "0.0.0";
+
+const NPM_PACKAGE_NAME = UPDATER_CONFIG.npmPackageName;
 
 // Fetch latest version from npm registry
 function fetchLatestVersion() {
@@ -38,8 +40,7 @@ function compareVersions(a, b) {
 
 export async function GET() {
   const latestVersion = await fetchLatestVersion();
-  const currentVersion = pkg.version;
-  const hasUpdate = latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false;
+  const hasUpdate = latestVersion ? compareVersions(latestVersion, CURRENT_VERSION) > 0 : false;
 
-  return Response.json({ currentVersion, latestVersion, hasUpdate });
+  return Response.json({ currentVersion: CURRENT_VERSION, latestVersion, hasUpdate });
 }

@@ -148,6 +148,33 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",
     ],
   },
+  warmup_runs: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      schedule_id: "TEXT NOT NULL",
+      provider_connection_id: "TEXT NOT NULL",
+      scheduled_for_utc: "TEXT NOT NULL",
+      actual_ran_at: "TEXT NOT NULL",
+      local_date: "TEXT NOT NULL",
+      local_time: "TEXT NOT NULL",
+      timezone: "TEXT NOT NULL",
+      dedupe_key: "TEXT NOT NULL",
+      status: "TEXT NOT NULL",
+      error: "TEXT",
+      created_at: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_warmup_runs_created ON warmup_runs(created_at DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_warmup_runs_dedupe ON warmup_runs(dedupe_key)",
+    ],
+  },
+  warmup_dedupe: {
+    columns: {
+      dedupe_key: "TEXT PRIMARY KEY",
+      status: "TEXT NOT NULL",
+      created_at: "TEXT NOT NULL",
+    },
+  },
 };
 
 export function buildCreateTableSql(name, def) {

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>9Router Warmup Scheduler Mockup</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0f17; --panel:#111827; --panel2:#0f172a; --line:#243044; --text:#eef4ff; --muted:#94a3b8; --brand:#f97316; --brand2:#fb923c; --green:#22c55e; --red:#ef4444; --blue:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:radial-gradient(circle at top left, rgba(249,115,22,.18), transparent 30%), var(--bg); color:var(--text); }
+  .app { display:grid; grid-template-columns:280px 1fr; min-height:100vh; }
+  .sidebar { border-right:1px solid rgba(255,255,255,.08); background:rgba(15,23,42,.78); backdrop-filter:blur(18px); padding:18px 16px; }
+  .brand { display:flex; gap:12px; align-items:center; padding:8px 8px 22px; }
+  .logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--brand),#c2410c); display:grid; place-items:center; font-weight:800; }
+  .brand b { display:block; font-size:18px; }
+  .brand span { color:var(--muted); font-size:12px; }
+  .nav { display:flex; flex-direction:column; gap:6px; }
+  .nav a { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:12px; color:var(--muted); text-decoration:none; font-size:14px; }
+  .nav a.active { color:var(--brand2); background:rgba(249,115,22,.12); }
+  .main { padding:28px; }
+  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; margin-bottom:22px; }
+  h1 { margin:0; font-size:30px; letter-spacing:-.04em; }
+  .sub { margin-top:7px; color:var(--muted); font-size:14px; }
+  .actions { display:flex; gap:10px; }
+  button { border:0; border-radius:12px; padding:10px 14px; color:white; font-weight:700; cursor:pointer; background:#1f2937; }
+  .primary { background:linear-gradient(135deg,var(--brand),#ea580c); box-shadow:0 12px 34px rgba(249,115,22,.22); }
+  .ghost { background:rgba(255,255,255,.07); color:#dbeafe; border:1px solid rgba(255,255,255,.08); }
+  .grid { display:grid; grid-template-columns:minmax(0,1.45fr) 390px; gap:18px; align-items:start; }
+  .panel { border:1px solid rgba(255,255,255,.08); background:linear-gradient(180deg,rgba(17,24,39,.92),rgba(15,23,42,.92)); border-radius:22px; box-shadow:0 24px 80px rgba(0,0,0,.25); }
+  .panel-h { padding:18px 18px 0; display:flex; justify-content:space-between; align-items:center; }
+  .panel-h h2 { margin:0; font-size:16px; }
+  .panel-b { padding:18px; }
+  .schedule { border:1px solid rgba(255,255,255,.08); border-radius:18px; background:rgba(2,6,23,.35); padding:16px; margin-bottom:14px; }
+  .schedule-head { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:14px; }
+  .schedule-title { display:flex; flex-direction:column; gap:3px; }
+  .schedule-title b { font-size:15px; }
+  .schedule-title span { color:var(--muted); font-size:12px; }
+  .toggle { width:44px; height:24px; border-radius:999px; background:rgba(34,197,94,.25); border:1px solid rgba(34,197,94,.45); position:relative; }
+  .toggle:after { content:""; width:18px; height:18px; border-radius:999px; background:var(--green); position:absolute; top:2px; right:3px; box-shadow:0 0 18px rgba(34,197,94,.75); }
+  .row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; margin:10px 0; }
+  .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+  .select, .input { border:1px solid rgba(255,255,255,.08); background:#0b1220; color:#e5e7eb; border-radius:12px; padding:10px 12px; font-size:13px; }
+  .chips { display:flex; gap:7px; flex-wrap:wrap; }
+  .chip { padding:7px 10px; border-radius:999px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.08); color:#dbeafe; font-size:12px; }
+  .chip.on { background:rgba(249,115,22,.14); color:#fed7aa; border-color:rgba(249,115,22,.35); }
+  .mini-actions { display:flex; gap:8px; margin-top:14px; }
+  .side { display:flex; flex-direction:column; gap:18px; position:sticky; top:20px; }
+  .timeline { display:flex; flex-direction:column; gap:10px; }
+  .event { display:flex; justify-content:space-between; gap:12px; padding:11px 12px; border-radius:14px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.06); font-size:13px; }
+  .event small { display:block; color:var(--muted); margin-top:2px; }
+  .badge { align-self:flex-start; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:800; }
+  .green { background:rgba(34,197,94,.16); color:#86efac; }
+  .blue { background:rgba(56,189,248,.16); color:#7dd3fc; }
+  .red { background:rgba(239,68,68,.16); color:#fca5a5; }
+  .run { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.07); font-size:13px; }
+  .dot { width:9px; height:9px; border-radius:999px; background:var(--green); box-shadow:0 0 14px rgba(34,197,94,.7); }
+  .dot.fail { background:var(--red); box-shadow:0 0 14px rgba(239,68,68,.7); }
+  .note { margin-top:18px; padding:14px 16px; border-radius:16px; background:rgba(249,115,22,.1); border:1px solid rgba(249,115,22,.2); color:#fed7aa; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">9</div><div><b>9Router</b><span>v0.4.8</span></div></div>
+    <nav class="nav">
+      <a>Endpoint</a><a>Providers</a><a>Combos</a><a>Usage</a><a>Quota Tracker</a><a class="active">Warmup</a><a>MITM</a><a>CLI Tools</a>
+    </nav>
+  </aside>
+  <main class="main">
+    <div class="top">
+      <div><h1>Warmup Scheduler</h1><div class="sub">Keep selected provider connections warm with scheduled minimal requests.</div></div>
+      <div class="actions"><button class="ghost">Run now</button><button class="primary">Save changes</button></div>
+    </div>
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-h"><h2>Schedules</h2><button class="primary">+ Add schedule</button></div>
+        <div class="panel-b">
+          <div class="schedule">
+            <div class="schedule-head"><div class="schedule-title"><b>Claude weekday warmup</b><span>Asia/Ho_Chi_Minh · dedupe per time slot</span></div><div class="toggle"></div></div>
+            <div class="row"><div class="label">Provider</div><div class="select">Claude Code — claude-sonnet-4.5</div></div>
+            <div class="row"><div class="label">Days</div><div class="chips"><span class="chip on">T2</span><span class="chip on">T3</span><span class="chip on">T4</span><span class="chip on">T5</span><span class="chip on">T6</span><span class="chip">T7</span><span class="chip">CN</span></div></div>
+            <div class="row"><div class="label">Times</div><div class="chips"><span class="chip on">05:00</span><span class="chip on">10:00</span><span class="chip on">15:00</span><span class="chip on">20:00</span><span class="chip">+ Add</span></div></div>
+            <div class="row"><div class="label">Prompt</div><div class="input">Quick warmup ping. Reply ok.</div></div>
+            <div class="mini-actions"><button class="ghost">Duplicate</button><button class="ghost">Disable</button><button class="ghost">Delete</button></div>
+          </div>
+          <div class="schedule" style="opacity:.72">
+            <div class="schedule-head"><div class="schedule-title"><b>Weekend light warmup</b><span>Off · GLM fallback</span></div><div class="toggle" style="background:rgba(148,163,184,.18);border-color:rgba(148,163,184,.25)"></div></div>
+            <div class="row"><div class="label">Provider</div><div class="select">GLM — glm-4.6</div></div>
+            <div class="row"><div class="label">Days</div><div class="chips"><span class="chip">T2</span><span class="chip">T3</span><span class="chip">T4</span><span class="chip">T5</span><span class="chip">T6</span><span class="chip on">T7</span><span class="chip on">CN</span></div></div>
+            <div class="row"><div class="label">Times</div><div class="chips"><span class="chip on">09:00</span><span class="chip on">21:00</span></div></div>
+          </div>
+        </div>
+      </section>
+      <aside class="side">
+        <section class="panel"><div class="panel-h"><h2>Next 7 days</h2><span class="badge blue">Preview</span></div><div class="panel-b timeline">
+          <div class="event"><div><b>Today 15:00</b><small>Claude weekday warmup</small></div><span class="badge green">Due</span></div>
+          <div class="event"><div><b>Today 20:00</b><small>Claude weekday warmup</small></div><span class="badge blue">Planned</span></div>
+          <div class="event"><div><b>Thu 05:00</b><small>Claude weekday warmup</small></div><span class="badge blue">Planned</span></div>
+          <div class="event"><div><b>Thu 10:00</b><small>Claude weekday warmup</small></div><span class="badge blue">Planned</span></div>
+        </div></section>
+        <section class="panel"><div class="panel-h"><h2>Recent runs</h2></div><div class="panel-b">
+          <div class="run"><span class="dot"></span><div><b>10:00 success</b><div class="sub">Claude Code · 312ms</div></div><span>OK</span></div>
+          <div class="run"><span class="dot fail"></span><div><b>05:00 failed</b><div class="sub">Missing provider token</div></div><span>Fail</span></div>
+          <div class="run"><span class="dot"></span><div><b>Yesterday 20:00</b><div class="sub">Claude Code · 280ms</div></div><span>OK</span></div>
+        </div></section>
+      </aside>
+    </div>
+    <div class="note">Suggested direction: compact card editor. Good for few schedules, visual enough, matches 9Router sidebar/dashboard style.</div>
+  </main>
+</div>
+</body>
+</html>

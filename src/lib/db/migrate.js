@@ -6,7 +6,7 @@ import { MIGRATIONS, latestVersion } from "./migrations/index.js";
 import { getMetaSync, setMetaSync } from "./helpers/metaStore.js";
 import { makeBackupDir, backupFile, pruneOldBackups } from "./backup.js";
 import { getAppVersion } from "./version.js";
-import { stringifyJson } from "./helpers/jsonCol.js";
+import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
 
 // Marker file: prevents re-importing legacy JSON when user wipes data.sqlite.
 const MIGRATED_MARKER = path.join(DB_DIR, ".migrated-from-json");
@@ -73,6 +73,56 @@ function runVersionedMigrations(adapter) {
     console.log(`[DB][migrate] applied #${m.version} ${m.name}`);
   }
   return { applied: pending.length, from: current, to: lastApplied };
+}
+
+// ─── One-time legacy warmup runs migration (kv:warmup/runs → tables) ─────
+function migrateLegacyWarmupRunsSync(adapter) {
+  if (getMetaSync(adapter, "warmupRunsMigrated", "0") === "1") return;
+  const row = adapter.get(`SELECT value FROM kv WHERE scope='warmup' AND key='runs'`);
+  if (!row) {
+    setMetaSync(adapter, "warmupRunsMigrated", "1");
+    return;
+  }
+  const legacy = parseJson(row.value, []);
+  const total = Array.isArray(legacy) ? legacy.length : 0;
+  let inserted = 0;
+  try {
+    adapter.transaction(() => {
+      for (const r of Array.isArray(legacy) ? legacy : []) {
+        if (!r || !r.dedupeKey) continue;
+        inserted += 1;
+        const id = r.id || `${r.dedupeKey}:${r.createdAt || ""}`;
+        const createdAt = r.createdAt || new Date().toISOString();
+        const status = r.status || "success";
+        adapter.run(
+          `INSERT OR IGNORE INTO warmup_runs(id, schedule_id, provider_connection_id, scheduled_for_utc, actual_ran_at, local_date, local_time, timezone, dedupe_key, status, error, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            r.scheduleId || "",
+            r.providerConnectionId || "",
+            r.scheduledForUtc || createdAt,
+            r.actualRanAt || r.scheduledForUtc || createdAt,
+            r.localDate || "",
+            r.localTime || "",
+            r.timezone || "",
+            r.dedupeKey,
+            status,
+            r.error || null,
+            createdAt,
+          ]
+        );
+        adapter.run(
+          `INSERT OR IGNORE INTO warmup_dedupe(dedupe_key, status, created_at) VALUES(?, ?, ?)`,
+          [r.dedupeKey, status, createdAt]
+        );
+      }
+      adapter.run(`DELETE FROM kv WHERE scope='warmup' AND key='runs'`);
+    });
+    setMetaSync(adapter, "warmupRunsMigrated", "1");
+    console.log(`[DB][migrate] warmup legacy runs drained: ${inserted}/${total} rows → warmup_runs/warmup_dedupe`);
+  } catch (err) {
+    console.warn(`[DB][migrate] warmup legacy runs migration failed: ${err.message} (kept kv row; will retry on next boot)`);
+  }
 }
 
 // ─── Auto-sync (additive only): add missing tables/columns/indexes ───────
@@ -226,6 +276,9 @@ export async function runMigrationOnce(adapter) {
 
   // 2. Additive sync (auto add missing columns/indexes declared in TABLES)
   syncSchemaFromTables(adapter);
+
+  // 2b. One-time legacy warmup runs migration (kv blob → warmup_runs/warmup_dedupe)
+  migrateLegacyWarmupRunsSync(adapter);
 
   // 3. One-time legacy JSON import (only if DB was fresh on entry)
   const alreadyImported = fs.existsSync(MIGRATED_MARKER);

@@ -1,0 +1,67 @@
+<h2>Warmup scheduler page — layout check</h2>
+<p class="subtitle">Proposed dashboard page at <code>/dashboard/warmup</code>. Click option if one feels right, or reply with changes.</p>
+
+<div class="cards">
+  <div class="card" data-choice="compact" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option A: Compact cards + right preview</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1.3fr .9fr;gap:16px;min-height:420px">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><strong>Warmup Scheduler</strong><div style="font-size:12px;opacity:.65">Keep providers awake on schedule</div></div>
+              <button class="mock-button">+ Add schedule</button>
+            </div>
+            <div style="border:1px solid #ddd;border-radius:12px;padding:12px;background:white">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>Claude weekday</strong><span style="background:#dcfce7;color:#166534;border-radius:999px;padding:3px 8px;font-size:11px">Enabled</span></div>
+              <div class="mock-input" style="margin-bottom:8px">Provider: Claude Code — sonnet</div>
+              <div style="display:flex;gap:6px;margin-bottom:8px"><span class="mock-button">T2</span><span class="mock-button">T3</span><span class="mock-button">T4</span><span class="mock-button">T5</span><span class="mock-button">T6</span></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="mock-button">05:00</span><span class="mock-button">10:00</span><span class="mock-button">15:00</span><span class="mock-button">20:00</span></div>
+            </div>
+            <div style="border:1px solid #ddd;border-radius:12px;padding:12px;background:white;opacity:.8">
+              <strong>Weekend light</strong>
+              <div style="margin-top:8px;display:flex;gap:6px"><span class="mock-button">T7</span><span class="mock-button">CN</span><span class="mock-button">09:00</span></div>
+            </div>
+          </div>
+          <div style="border:1px solid #ddd;border-radius:12px;padding:12px;background:#fafafa">
+            <strong>Next 7 days</strong>
+            <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;font-size:12px">
+              <div>Today 15:00 — Claude weekday</div><div>Today 20:00 — Claude weekday</div><div>Thu 05:00 — Claude weekday</div><div>Thu 10:00 — Claude weekday</div>
+            </div>
+            <hr style="margin:16px 0;border:none;border-top:1px solid #ddd" />
+            <strong>Recent runs</strong>
+            <div style="margin-top:12px;font-size:12px;color:#166534">✓ 10:00 success</div>
+            <div style="margin-top:8px;font-size:12px;color:#991b1b">× 05:00 missing token</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A. Compact cards</h3><p>Fast edit. Best for 1-5 schedules. Preview always visible.</p></div>
+  </div>
+
+  <div class="card" data-choice="table" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option B: Table manager</div>
+        <div class="mockup-body" style="min-height:420px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><strong>Warmup Scheduler</strong><button class="mock-button">+ Add schedule</button></div>
+          <div style="border:1px solid #ddd;border-radius:12px;overflow:hidden;background:white;font-size:12px">
+            <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr .7fr;padding:10px;background:#f5f5f5;font-weight:700"><div>Name</div><div>Provider</div><div>Days</div><div>Times</div><div>Status</div></div>
+            <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr .7fr;padding:10px;border-top:1px solid #eee"><div>Claude weekday</div><div>Claude Code</div><div>T2 T3 T4 T5 T6</div><div>05 10 15 20</div><div>On</div></div>
+            <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr .7fr;padding:10px;border-top:1px solid #eee"><div>Weekend light</div><div>GLM</div><div>T7 CN</div><div>09 21</div><div>Off</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+            <div style="border:1px solid #ddd;border-radius:12px;padding:12px;background:#fafafa"><strong>Preview</strong><div style="font-size:12px;margin-top:8px">Today 15:00<br/>Today 20:00<br/>Thu 05:00</div></div>
+            <div style="border:1px solid #ddd;border-radius:12px;padding:12px;background:#fafafa"><strong>Recent runs</strong><div style="font-size:12px;margin-top:8px">✓ success<br/>× failed<br/>✓ success</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B. Table manager</h3><p>Dense overview. Worse for editing days/times inline.</p></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Recommendation</h3>
+  <p>Pick A. 9router users likely manage few schedules. Card editor gives clearer day/time controls and preview stays visible.</p>
+</div>

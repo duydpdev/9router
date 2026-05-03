@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -7,6 +8,10 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 const tracingRoot = process.env.NEXT_TRACING_ROOT_MODE === "workspace"
   ? join(projectRoot, "..")
   : projectRoot;
+
+// Read package.json at build time so version is always fresh.
+// Avoids webpack JSON-inline staleness with ESM `with { type: "json" }` imports.
+const pkgJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -23,7 +28,9 @@ const nextConfig = {
   images: {
     unoptimized: true
   },
-  env: {},
+  env: {
+    APP_VERSION: pkgJson.version,
+  },
   webpack: (config, { isServer }) => {
     // Ignore fs/path modules in browser bundle
     if (!isServer) {

@@ -1,0 +1,7 @@
+{"type":"server-started","port":62205,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:62205","screen_dir":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/content","state_dir":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/state"}
+{"type":"screen-added","file":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/content/warmup-layout-v1.html"}
+{"type":"screen-updated","file":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/content/warmup-layout-v1.html"}
+{"type":"screen-added","file":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/content/warmup-layout-v2.html"}
+{"type":"screen-added","file":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/content/warmup-ai-style-v1.html"}
+{"type":"screen-added","file":"/Users/phanduy/workspaces/github.com/duydp.dev/tools/9router/.superpowers/brainstorm/27252-1777446256/content/warmup-9router-multi-provider-v1.html"}
+{"type":"server-stopped","reason":"idle timeout"}

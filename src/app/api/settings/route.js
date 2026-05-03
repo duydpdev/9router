@@ -3,6 +3,10 @@ import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
+import {
+  normalizePasswordForStorage,
+  verifyPasswordAgainstHash,
+} from "@/lib/password";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,20 +50,23 @@ export async function PATCH(request) {
         if (!body.currentPassword) {
           return NextResponse.json({ error: "Current password required" }, { status: 400 });
         }
-        const isValid = await bcrypt.compare(body.currentPassword, currentHash);
+        const isValid = await verifyPasswordAgainstHash(body.currentPassword, currentHash);
         if (!isValid) {
           return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
         }
       } else {
         // First time setting password, no current password needed
         // Allow empty currentPassword or default "123456"
-        if (body.currentPassword && body.currentPassword !== "123456") {
+        if (
+          body.currentPassword &&
+          normalizePasswordForStorage(body.currentPassword) !== normalizePasswordForStorage("123456")
+        ) {
            return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
         }
       }
 
       const salt = await bcrypt.genSalt(10);
-      body.password = await bcrypt.hash(body.newPassword, salt);
+      body.password = await bcrypt.hash(normalizePasswordForStorage(body.newPassword), salt);
       delete body.newPassword;
       delete body.currentPassword;
     }

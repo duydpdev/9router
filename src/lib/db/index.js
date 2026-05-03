@@ -165,6 +165,14 @@ export async function importDb(payload) {
   return await exportDb();
 }
 
+// Warmup
+export {
+  getWarmupSchedulesFromDb, saveWarmupSchedulesToDb,
+  getWarmupRunsFromDb, appendWarmupRunToDb,
+  insertWarmupRun, hasSuccessfulWarmupRunFromDb,
+  getWarmupRunsPageFromDb, sweepWarmupRunsRetentionInDb,
+} from "./repos/warmupRepo.js";
+
 // Eager init helper (optional)
 export async function initDb() {
   await getAdapter();
