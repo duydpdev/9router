@@ -11,7 +11,7 @@ const DIGEST_SAMPLE_LIMIT = 5;
 
 const TELEGRAM_TOKEN_RE = /^\d{1,12}:[A-Za-z0-9_-]{30,80}$/;
 const DISCORD_WEBHOOK_RE =
-  /^https:\/\/(discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]{60,80}$/;
+  /^https:\/\/(discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]{40,200}$/;
 const HTTP_URL_RE = /^https?:\/\/.+/;
 const BOT_TOKEN_PATTERN_RE = /bot\d{1,12}:[A-Za-z0-9_-]{20,}/g;
 const MD2_ESCAPE_RE = /([_*\[\]()~`>#+\-=|{}.!\\])/g;
@@ -25,9 +25,27 @@ const PRIVATE_IPV4 = [
 ];
 
 let CONFIG = null;
+let DISPATCHER = null;
+let DISPATCHER_URI = null;
 const recoveryState = new Map();
 const rateLimitWindow = [];
 const recoveryWindow = [];
+
+// Cache ProxyAgent at module scope — undici keeps a connection pool per agent,
+// so reusing it avoids socket leaks across fan-outs.
+function getDispatcher(proxyUrl) {
+  if (!proxyUrl) return undefined;
+  if (DISPATCHER && DISPATCHER_URI === proxyUrl) return DISPATCHER;
+  try {
+    DISPATCHER = new ProxyAgent({ uri: proxyUrl });
+    DISPATCHER_URI = proxyUrl;
+    return DISPATCHER;
+  } catch {
+    DISPATCHER = null;
+    DISPATCHER_URI = null;
+    return undefined;
+  }
+}
 
 function readEnv(env = process.env) {
   const enabled = String(env.WARMUP_NOTIFY_ENABLED || "").toLowerCase() === "true";
@@ -455,7 +473,7 @@ async function sendGeneric(payload, url, dispatcher) {
 }
 
 async function fanOut(kind, cfg, ctx) {
-  const dispatcher = cfg.proxyUrl ? new ProxyAgent({ uri: cfg.proxyUrl }) : undefined;
+  const dispatcher = getDispatcher(cfg.proxyUrl);
   const jobs = [];
   if (cfg.discord.enabled) {
     jobs.push(
@@ -509,7 +527,7 @@ async function fanOut(kind, cfg, ctx) {
 }
 
 async function fanOutDigest(cfg, batch) {
-  const dispatcher = cfg.proxyUrl ? new ProxyAgent({ uri: cfg.proxyUrl }) : undefined;
+  const dispatcher = getDispatcher(cfg.proxyUrl);
   const jobs = [];
   if (cfg.discord.enabled) {
     jobs.push(
@@ -672,6 +690,8 @@ export function __resetForTests(overrides = {}) {
   recoveryState.clear();
   rateLimitWindow.length = 0;
   recoveryWindow.length = 0;
+  DISPATCHER = null;
+  DISPATCHER_URI = null;
   CONFIG = Object.freeze({
     enabled: true,
     discord: Object.freeze({
