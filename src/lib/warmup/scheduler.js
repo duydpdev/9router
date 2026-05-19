@@ -12,6 +12,11 @@ async function loadRunner() {
   return import("@/lib/warmup/runner");
 }
 
+// red-team #12: notifier stays lazy so it never loads in non-scheduler paths.
+async function loadNotifier() {
+  return import("@/lib/warmup/notifier");
+}
+
 export const MAX_CATCHUP_HOURS = 6;
 const CHECK_INTERVAL_MS = 60 * 1000;
 const RETENTION_SWEEP_MS = 10 * 60 * 1000;
@@ -24,10 +29,25 @@ const g = (global.__warmupScheduler ??= {
   lastTickAt: null,
   lastResult: null,
   lastClampedFrom: null,
+  bootLogged: false,
 });
 
 export async function startWarmupScheduler() {
   if (g.interval) return;
+
+  // red-team #11: boot log must precede the initial tick so its line is the
+  // first warmup-notifier entry in stdout even when catch-up replay emits
+  // many `event:"sent"` lines.
+  if (!g.bootLogged) {
+    g.bootLogged = true;
+    try {
+      const { logBootStatus } = await loadNotifier();
+      logBootStatus();
+    } catch (error) {
+      console.log("[WarmupScheduler] notifier boot log failed:", error.message);
+    }
+  }
+
   try {
     await tickWarmupScheduler();
   } catch (error) {
@@ -85,7 +105,10 @@ export async function tickWarmupScheduler() {
     let results = [];
     if (due.length) {
       const { runWarmupItems } = await loadRunner();
-      results = await runWarmupItems(due);
+      // red-team #2: catch-up batches (>5 min outage) collapse to a single digest.
+      const isCatchUp = now.getTime() - from.getTime() > 5 * 60 * 1000;
+      const notify = isCatchUp ? "digest" : "scheduler";
+      results = await runWarmupItems(due, { notify });
     }
 
     g.lastTickAt = now.toISOString();

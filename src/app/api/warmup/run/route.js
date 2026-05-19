@@ -39,7 +39,7 @@ export async function POST(request) {
       }
     }
 
-    const results = await runWarmupItems(items);
+    const results = await runWarmupItems(items, { notify: false });
     return NextResponse.json({ results });
   } catch (error) {
     console.log("[WarmupAPI] manual run failed:", error);
