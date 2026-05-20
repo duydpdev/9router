@@ -1,4 +1,5 @@
-import { findDueWarmupRunsInRange } from "@/lib/warmup/schedule";
+import { getProviderConnections } from "@/lib/localDb";
+import { findDueWarmupRunsInRange, pruneOrphanProviderIds } from "@/lib/warmup/schedule";
 import {
   getWarmupSchedules,
   getWarmupLastTickAt,
@@ -101,7 +102,14 @@ export async function tickWarmupScheduler() {
     await setWarmupLastTickAt(now);
 
     const schedules = await getWarmupSchedules();
-    const due = findDueWarmupRunsInRange(schedules, from, now);
+    // Defensive: drop providerConnectionIds that no longer exist in the
+    // providerConnections table. Belt to the cascade-on-delete suspenders —
+    // cleans up orphans that predate the cascade or were created via a path
+    // that bypassed deleteProviderConnection.
+    const allConnections = await getProviderConnections();
+    const knownIds = new Set(allConnections.map((c) => c.id));
+    const filteredSchedules = pruneOrphanProviderIds(schedules, knownIds);
+    const due = findDueWarmupRunsInRange(filteredSchedules, from, now);
     let results = [];
     if (due.length) {
       const { runWarmupItems } = await loadRunner();

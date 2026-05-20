@@ -169,6 +169,35 @@ export async function updateProviderConnection(id, data) {
   return result;
 }
 
+// Cascade: strip deleted connection IDs from kv['warmup','schedules']. Called
+// inside an existing db.transaction so the connection delete + schedule scrub
+// are atomic.
+function pruneWarmupSchedulesInTx(db, deletedIds) {
+  if (!deletedIds || !deletedIds.size) return;
+  const kvRow = db.get(`SELECT value FROM kv WHERE scope = ? AND key = ?`, ["warmup", "schedules"]);
+  if (!kvRow?.value) return;
+  let schedules;
+  try {
+    schedules = JSON.parse(kvRow.value);
+  } catch {
+    return;
+  }
+  if (!Array.isArray(schedules)) return;
+  let mutated = false;
+  for (const s of schedules) {
+    if (!Array.isArray(s?.providerConnectionIds)) continue;
+    const before = s.providerConnectionIds.length;
+    s.providerConnectionIds = s.providerConnectionIds.filter((cid) => !deletedIds.has(cid));
+    if (s.providerConnectionIds.length !== before) mutated = true;
+  }
+  if (mutated) {
+    db.run(
+      `INSERT INTO kv(scope, key, value) VALUES(?, ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
+      ["warmup", "schedules", JSON.stringify(schedules)],
+    );
+  }
+}
+
 export async function deleteProviderConnection(id) {
   const db = await getAdapter();
   let ok = false;
@@ -177,6 +206,7 @@ export async function deleteProviderConnection(id) {
     if (!row) return;
     db.run(`DELETE FROM providerConnections WHERE id = ?`, [id]);
     reorderInTx(db, row.provider);
+    pruneWarmupSchedulesInTx(db, new Set([id]));
     ok = true;
   });
   return ok;
@@ -184,9 +214,15 @@ export async function deleteProviderConnection(id) {
 
 export async function deleteProviderConnectionsByProvider(providerId) {
   const db = await getAdapter();
-  const before = db.get(`SELECT COUNT(*) AS n FROM providerConnections WHERE provider = ?`, [providerId]);
-  db.run(`DELETE FROM providerConnections WHERE provider = ?`, [providerId]);
-  return before?.n || 0;
+  let count = 0;
+  db.transaction(() => {
+    const rows = db.all(`SELECT id FROM providerConnections WHERE provider = ?`, [providerId]);
+    const ids = new Set(rows.map((r) => r.id));
+    count = ids.size;
+    db.run(`DELETE FROM providerConnections WHERE provider = ?`, [providerId]);
+    pruneWarmupSchedulesInTx(db, ids);
+  });
+  return count;
 }
 
 export async function reorderProviderConnections(providerId) {

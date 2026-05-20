@@ -145,6 +145,20 @@ export function buildDedupeKey(scheduleId, providerConnectionId, localDate, loca
   return `${scheduleId}:${providerConnectionId}:${localDate}:${localTime}`;
 }
 
+// Defensive: drop providerConnectionIds that don't appear in knownIds. Used by
+// the scheduler tick so orphans (deleted connections still referenced in a
+// schedule) can't trigger fan-outs that throw "Provider connection not found".
+export function pruneOrphanProviderIds(schedules, knownIds) {
+  if (!Array.isArray(schedules)) return [];
+  const ids = knownIds instanceof Set ? knownIds : new Set(knownIds || []);
+  return schedules.map((s) => ({
+    ...s,
+    providerConnectionIds: Array.isArray(s?.providerConnectionIds)
+      ? s.providerConnectionIds.filter((cid) => ids.has(cid))
+      : [],
+  }));
+}
+
 function normalizeProviderIds(value) {
   return Array.from(new Set(
     Array.isArray(value) ? value.map((id) => String(id).trim()).filter(Boolean) : []
