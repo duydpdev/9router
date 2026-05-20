@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
-import { 
-  getProvider, 
-  generateAuthData, 
-  exchangeTokens, 
-  requestDeviceCode, 
-  pollForToken 
+import {
+  getProvider,
+  generateAuthData,
+  exchangeTokens,
+  requestDeviceCode,
+  pollForToken
 } from "@/lib/oauth/providers";
 import { createProviderConnection } from "@/models";
+import {
+  getProviderConnectionById,
+  updateProviderConnection,
+} from "@/lib/db/repos/connectionsRepo";
+import { clearNeedsReauth } from "@/lib/oauth/reauth-state";
+import { refreshProjectId } from "@/sse/services/tokenRefresh";
 import {
   startCodexProxy,
   stopCodexProxy,
@@ -18,7 +24,52 @@ import {
   registerXaiSession,
   getXaiSessionStatus,
   clearXaiSession,
+  signOAuthState,
+  verifyOAuthState,
 } from "@/lib/oauth/utils/server";
+
+// Resolve the optional reauth target connection from a signed OAuth state.
+// Returns:
+//   { connection }  → row exists and matches the provider
+//   { error: NextResponse } → the route handler must return this immediately
+//   { connectionId: null }  → no reauth claim in state; fall through to create-new
+async function resolveReauthTarget(provider, state) {
+  if (!state) return { connectionId: null };
+  const verified = verifyOAuthState(state);
+  if (!verified || !verified.connectionId) return { connectionId: null };
+
+  const connection = await getProviderConnectionById(verified.connectionId);
+  if (!connection) {
+    return {
+      error: NextResponse.json({ error: "connection not found" }, { status: 404 }),
+    };
+  }
+  if (connection.provider !== provider) {
+    return {
+      error: NextResponse.json({ error: "provider mismatch" }, { status: 400 }),
+    };
+  }
+  return { connection };
+}
+
+async function applyReauthUpdate(connection, tokenData) {
+  await updateProviderConnection(connection.id, {
+    accessToken: tokenData.accessToken,
+    refreshToken: tokenData.refreshToken ?? connection.refreshToken,
+    expiresAt: tokenData.expiresIn
+      ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+      : null,
+    testStatus: "active",
+    lastError: null,
+    lastErrorAt: null,
+    errorCode: null,
+    lastErrorType: null,
+  });
+  await clearNeedsReauth(connection.id);
+  if (connection.provider === "antigravity" || connection.provider === "gemini-cli") {
+    refreshProjectId(connection.provider, connection.id, tokenData.accessToken);
+  }
+}
 
 async function completeXaiManualCode(code, state) {
   const session = state ? getXaiSessionStatus(state) : null;
@@ -73,11 +124,17 @@ export async function GET(request, { params }) {
 
     if (action === "authorize") {
       const redirectUri = searchParams.get("redirect_uri") || "http://localhost:8080/callback";
+      const reauthConnectionId = searchParams.get("connectionId") || null;
       // Collect provider-specific meta params (e.g. gitlab passes baseUrl, clientId, clientSecret)
-      const reservedParams = new Set(["redirect_uri"]);
+      const reservedParams = new Set(["redirect_uri", "connectionId"]);
       const meta = {};
       searchParams.forEach((value, key) => { if (!reservedParams.has(key)) meta[key] = value; });
       const authData = await generateAuthData(provider, redirectUri, Object.keys(meta).length ? meta : undefined);
+      // When reauth target is supplied, replace the generated state with a
+      // signed one that round-trips the connectionId. Verified on exchange.
+      if (reauthConnectionId && authData?.state) {
+        authData.state = signOAuthState({ connectionId: reauthConnectionId });
+      }
       return NextResponse.json(authData);
     }
 
@@ -239,19 +296,36 @@ export async function POST(request, { params }) {
       // Exchange code for tokens (meta carries provider-specific params, e.g. gitlab clientId/baseUrl)
       const tokenData = await exchangeTokens(provider, code, redirectUri, codeVerifier, state, meta);
 
+      // Reauth flow: signed state carries connectionId — update existing row.
+      const reauth = await resolveReauthTarget(provider, state);
+      if (reauth.error) return reauth.error;
+      if (reauth.connection) {
+        await applyReauthUpdate(reauth.connection, tokenData);
+        return NextResponse.json({
+          success: true,
+          updated: true,
+          connection: {
+            id: reauth.connection.id,
+            provider: reauth.connection.provider,
+            email: reauth.connection.email,
+            displayName: reauth.connection.displayName,
+          },
+        });
+      }
+
       // Save to database
       const connection = await createProviderConnection({
         provider,
         authType: "oauth",
         ...tokenData,
-        expiresAt: tokenData.expiresIn 
-          ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString() 
+        expiresAt: tokenData.expiresIn
+          ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
           : null,
         testStatus: "active",
       });
 
-      return NextResponse.json({ 
-        success: true, 
+      return NextResponse.json({
+        success: true,
         connection: {
           id: connection.id,
           provider: connection.provider,

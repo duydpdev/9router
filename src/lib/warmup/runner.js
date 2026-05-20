@@ -24,9 +24,9 @@ const WARMUP_MODEL_BY_PROVIDER = {
   qwen: "qwen3-coder-flash",
   iflow: "qwen3-coder-plus",
   github: "gpt-4o-mini",
-  claude: "claude-haiku-4-5-20251001",
-  "claude-code": "claude-haiku-4-5-20251001",
-  openrouter: "anthropic/claude-haiku-4-5-20251001",
+  claude: "claude-sonnet-4-5-20250929",
+  "claude-code": "claude-sonnet-4-5-20250929",
+  openrouter: "anthropic/claude-sonnet-4-5-20250929",
   openai: "gpt-4o-mini",
   gemini: "gemini-2.5-flash",
 };

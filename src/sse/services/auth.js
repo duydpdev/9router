@@ -60,10 +60,11 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       return null;
     }
 
-    // Filter out model-locked and excluded connections
+    // Filter out model-locked, excluded, and needs-reauth connections
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
+      if (c.needsReauth) return false;
       return true;
     });
 
@@ -71,13 +72,27 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     connections.forEach(c => {
       const excluded = excludeSet.has(c.id);
       const locked = isModelLockActive(c, model);
-      if (excluded || locked) {
+      const needsReauth = !!c.needsReauth;
+      if (excluded || locked || needsReauth) {
         const lockUntil = getEarliestModelLockUntil(c);
-        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""}`);
+        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""} ${needsReauth ? `needsReauth(${c.reauthReason})` : ""}`);
       }
     });
 
     if (availableConnections.length === 0) {
+      // Distinguish "all need reauth" from "all rate-limited" — different UX:
+      // reauth = user must reconnect; rate-limit = wait. Empty array guard
+      // prevents `.every()` returning true on no-eligible-rows.
+      const eligibleByExclude = connections.filter(c => !excludeSet.has(c.id));
+      if (eligibleByExclude.length > 0 && eligibleByExclude.every(c => c.needsReauth)) {
+        const sample = eligibleByExclude[0];
+        log.warn("AUTH", `${provider} | all ${eligibleByExclude.length} accounts need reauth`);
+        return {
+          allNeedReauth: true,
+          lastError: `Reconnect via dashboard (${sample?.reauthReason || "unknown"})`,
+          lastErrorCode: 401,
+        };
+      }
       // Find earliest lock expiry across all connections for retry timing
       const lockedConns = connections.filter(c => isModelLockActive(c, model));
       const expiries = lockedConns.map(c => getEarliestModelLockUntil(c)).filter(Boolean);

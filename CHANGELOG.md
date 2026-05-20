@@ -1,3 +1,32 @@
+# Unreleased
+
+## Features
+- Provider auto re-auth: detect dead refresh tokens (Case B — `invalid_grant`,
+  Codex `refresh_token_reused`, etc.), mark the connection `needsReauth=true`,
+  send a single Discord / Telegram / Generic webhook with a 1-click reconnect
+  deep-link, and auto-skip the dead connection in combo fallback. Webhook
+  reuses the existing warmup notifier env vars (`WARMUP_NOTIFY_ENABLED`,
+  `WARMUP_NOTIFY_DISCORD_WEBHOOK`, `WARMUP_NOTIFY_TELEGRAM_BOT_TOKEN`,
+  `WARMUP_NOTIFY_TELEGRAM_CHAT_ID`, `WARMUP_NOTIFY_GENERIC_WEBHOOK_URL`) plus
+  the new `PUBLIC_BASE_URL` for the deep-link host (falls back to a path-only
+  link if unset).
+- TTS / STT proactive token refresh — same `checkAndRefreshToken` path as
+  chat / embeddings / image / search / fetch.
+- Mid-stream `401 / 403` retry-once in `ttsCore` and `sttCore` via
+  `refreshWithRetry → executor.refreshCredentials`.
+- Dashboard: "Needs Reauth" badge + "Reconnect" button on every connection
+  row; provider list shows aggregate `Needs Reauth (N)` indicator.
+
+## Changed
+- OAuth exchange endpoint (`POST /api/oauth/[provider]/exchange`) accepts a
+  signed `state` parameter that carries the `connectionId` to reauth — when
+  set, the existing connection row is updated in place (no duplicate row).
+  Reuses `JWT_SECRET` (no new env var). Defense-in-depth: provider mismatch
+  → 400, unknown connectionId → 404.
+- Auto-reauth is opt-in per connection via `?reconnect=<connectionId>` deep
+  links emitted by the notifier; manual-reimport providers (Cursor, GitLab
+  PAT, iFlow cookie) keep their existing inline import UI.
+
 # v0.4.59 (2026-05-21)
 
 ## Fixes

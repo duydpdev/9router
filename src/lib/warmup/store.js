@@ -56,7 +56,35 @@ export async function saveWarmupSchedules(input) {
 
 export async function getWarmupSchedules() {
   const raw = await getWarmupSchedulesFromDb();
-  return normalizeWarmupSchedules(raw || []);
+  const schedules = normalizeWarmupSchedules(raw || []);
+
+  // Self-heal: prune providerConnectionIds that no longer match any row in
+  // providerConnections. Covers orphans created before the cascade fix in
+  // deleteProviderConnection (or via any path that bypassed it). Idempotent:
+  // a clean read does no writes. If the providerConnections lookup fails, we
+  // return un-pruned data so a transient DB error doesn't corrupt schedules.
+  let knownIds;
+  try {
+    const allConnections = await getProviderConnections();
+    knownIds = new Set(allConnections.map((c) => c.id));
+  } catch {
+    return schedules;
+  }
+  let mutated = false;
+  const pruned = schedules.map((s) => {
+    const before = s.providerConnectionIds.length;
+    const next = s.providerConnectionIds.filter((cid) => knownIds.has(cid));
+    if (next.length !== before) mutated = true;
+    return next.length === before ? s : { ...s, providerConnectionIds: next };
+  });
+  if (mutated) {
+    try {
+      await saveWarmupSchedulesToDb(pruned);
+    } catch {
+      // Persist failed — caller still gets the in-memory pruned view this call.
+    }
+  }
+  return pruned;
 }
 
 export async function appendWarmupRun(run) {

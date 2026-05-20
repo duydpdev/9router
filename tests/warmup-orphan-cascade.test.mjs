@@ -137,3 +137,34 @@ test("pruneOrphanProviderIds accepts plain array as knownIds", async () => {
   );
   assert.deepEqual(out[0].providerConnectionIds, ["a", "c"]);
 });
+
+test("getWarmupSchedules self-heals orphan IDs and persists the cleaned view", async () => {
+  await seedConnection("conn-alive-1", "claude");
+  // Write a schedule referencing a non-existent connection directly via the
+  // repo so we bypass validateWarmupSchedules (which would reject orphans).
+  const warmupRepo = await import("../src/lib/db/repos/warmupRepo.js");
+  await warmupRepo.saveWarmupSchedulesToDb([
+    {
+      id: "sched-heal-1",
+      name: "heal",
+      enabled: true,
+      providerConnectionIds: ["conn-alive-1", "conn-orphan-zzz"],
+      days: [0, 1, 2, 3, 4, 5, 6],
+      times: ["09:00"],
+      prompt: "p",
+      timezone: "UTC",
+    },
+  ]);
+
+  // First read: orphan stripped + persisted.
+  const first = await store.getWarmupSchedules();
+  assert.deepEqual(first[0].providerConnectionIds, ["conn-alive-1"]);
+
+  // Verify persistence — read raw from DB and confirm orphan is gone.
+  const rawAfter = await warmupRepo.getWarmupSchedulesFromDb();
+  assert.deepEqual(rawAfter[0].providerConnectionIds, ["conn-alive-1"]);
+
+  // Second read: nothing to prune, must still return the cleaned view.
+  const second = await store.getWarmupSchedules();
+  assert.deepEqual(second[0].providerConnectionIds, ["conn-alive-1"]);
+});

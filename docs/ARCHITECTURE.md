@@ -271,6 +271,48 @@ sequenceDiagram
 
 Refresh during live traffic is executed inside `open-sse/handlers/chatCore.js` via executor `refreshCredentials()`.
 
+### Auto Re-Login on Dead Refresh Tokens
+
+When the refresh token itself is permanently rejected (RFC 6749 `invalid_grant`,
+Codex / Auth0 family rotation, or persistent revocation), the proactive refresh
+path detects it and switches into the reauth flow:
+
+1. `src/lib/oauth/refresh-failure-classifier.js` maps the failure shape to one
+   of `invalid_grant | refresh_family_revoked | refresh_http_error | null`
+   (transient).
+2. On fatal: `src/lib/oauth/reauth-state.js::markNeedsReauth` writes
+   `needsReauth=true, reauthReason, reauthAt, lastErrorType` to the connection
+   `data` JSON via the existing transactional `updateProviderConnection`.
+3. `src/lib/notifier/reauth-alert.js::notifyReauthRequired` claims a
+   `(connectionId, reauthAt)` slot via a transaction-bounded compare-and-set
+   (`markReauthNotified`), then fans out a `[REAUTH]`-prefixed Discord /
+   Telegram / Generic webhook reusing the warmup notifier transport
+   (`sendDiscord` / `sendTelegram` / `sendGeneric`). If every channel rejects
+   the slot is rolled back so the next failed request re-fires.
+4. `src/sse/services/auth.js::getProviderCredentials` filters out
+   `needsReauth=true` rows; combo fallback hops to the next account
+   automatically and returns `{ allNeedReauth: true }` when every connection
+   in the eligible set is flagged.
+5. The webhook deep-link points to
+   `${PUBLIC_BASE_URL}/dashboard/providers/<provider>?reconnect=<connectionId>`
+   (path-only fallback if `PUBLIC_BASE_URL` is unset). The detail page reads
+   `?reconnect=` via `useSearchParams`, auto-opens the OAuth modal for that
+   exact row (guarded by `useRef` against React Strict-mode double effects),
+   and strips the query.
+6. `/api/oauth/[provider]/authorize?connectionId=<id>` swaps the random state
+   for an HMAC-signed token (`signOAuthState`, secret = same `loadJwtSecret`
+   used by the dashboard JWT cookie). The exchange handler
+   (`verifyOAuthState`) recovers the `connectionId`, asserts the row exists
+   and the providers match, then **updates** the existing row, calls
+   `clearNeedsReauth`, and (for `antigravity` / `gemini-cli`) kicks off
+   `refreshProjectId` to re-fetch the Google project id.
+
+Non-refresh-capable providers (Cursor import, GitLab PAT, GitHub device-flow
+follow-up) are categorized at runtime via `supportsAutomatedReauth(conn)` —
+they emit a `manual_reimport_needed` notification kind instead of trying a
+broken auto-OAuth round-trip, and the dashboard surfaces a "Re-import" CTA
+instead of "Reconnect".
+
 ## Cloud Sync Lifecycle (Enable / Sync / Disable)
 
 ```mermaid

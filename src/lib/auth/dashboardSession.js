@@ -4,7 +4,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { DATA_DIR } from "@/lib/dataDir";
 
-function loadJwtSecret() {
+// Exported so the OAuth signed-state helper can reuse the same secret
+// (no new env var). Same file fallback path as the JWT cookie signing key.
+export function loadJwtSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
   const file = path.join(DATA_DIR, "jwt-secret");
   try {

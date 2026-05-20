@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 import { createErrorResult } from "../utils/error.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { AI_PROVIDERS } from "../../src/shared/constants/providers.js";
+import { getExecutor } from "../executors/index.js";
+import { refreshWithRetry } from "../services/tokenRefresh.js";
 
 // Build auth headers from sttConfig + token
 function buildAuthHeaders(cfg, token) {
@@ -167,28 +169,64 @@ function jsonResponse(obj) {
  * STT core handler — dispatch by sttConfig.format.
  * @returns {Promise<{success, response, status?, error?}>}
  */
-export async function handleSttCore({ provider, model, formData, credentials }) {
+async function dispatchTranscribe(cfg, file, model, token, formData) {
+  switch (cfg.format) {
+    case "deepgram":        return transcribeDeepgram(cfg, file, model, token, formData);
+    case "assemblyai":      return transcribeAssemblyAI(cfg, file, model, token);
+    case "nvidia-asr":      return transcribeNvidia(cfg, file, model, token);
+    case "huggingface-asr": return transcribeHuggingFace(cfg, file, model, token);
+    case "gemini-stt":      return transcribeGemini(cfg, file, model, token, formData);
+    default:                return transcribeOpenAICompatible(cfg, file, model, token, formData);
+  }
+}
+
+export async function handleSttCore({ provider, model, formData, credentials, log, onCredentialsRefreshed }) {
   const file = formData.get("file");
   if (!file) return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: file");
 
   const cfg = AI_PROVIDERS[provider]?.sttConfig;
   if (!cfg) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Provider '${provider}' does not support STT`);
 
-  const token = cfg.authType === "none" ? null : (credentials?.apiKey || credentials?.accessToken);
+  let token = cfg.authType === "none" ? null : (credentials?.apiKey || credentials?.accessToken);
   if (cfg.authType !== "none" && !token) {
     return createErrorResult(HTTP_STATUS.UNAUTHORIZED, `No credentials for STT provider: ${provider}`);
   }
 
+  let result;
   try {
-    switch (cfg.format) {
-      case "deepgram":        return await transcribeDeepgram(cfg, file, model, token, formData);
-      case "assemblyai":      return await transcribeAssemblyAI(cfg, file, model, token);
-      case "nvidia-asr":      return await transcribeNvidia(cfg, file, model, token);
-      case "huggingface-asr": return await transcribeHuggingFace(cfg, file, model, token);
-      case "gemini-stt":      return await transcribeGemini(cfg, file, model, token, formData);
-      default:                return await transcribeOpenAICompatible(cfg, file, model, token, formData);
-    }
+    result = await dispatchTranscribe(cfg, file, model, token, formData);
   } catch (err) {
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, err.message || "STT request failed");
   }
+
+  // Mid-stream 401/403 retry-once: refresh credentials then re-dispatch one time.
+  const executor = getExecutor(provider);
+  if (
+    !result.success &&
+    (result.status === HTTP_STATUS.UNAUTHORIZED || result.status === HTTP_STATUS.FORBIDDEN) &&
+    cfg.authType !== "none" &&
+    executor?.refreshCredentials &&
+    credentials?.authType === "oauth"
+  ) {
+    const newCredentials = await refreshWithRetry(
+      () => executor.refreshCredentials(credentials, log),
+      3,
+      log,
+    );
+    if (newCredentials?.accessToken || newCredentials?.apiKey) {
+      log?.info?.("TOKEN", `${provider.toUpperCase()} | refreshed for STT`);
+      Object.assign(credentials, newCredentials);
+      if (onCredentialsRefreshed) await onCredentialsRefreshed(newCredentials);
+      token = newCredentials.apiKey || newCredentials.accessToken || token;
+      try {
+        result = await dispatchTranscribe(cfg, file, model, token, formData);
+      } catch (err) {
+        return createErrorResult(HTTP_STATUS.BAD_GATEWAY, err.message || "STT request failed");
+      }
+    } else {
+      log?.warn?.("TOKEN", `${provider.toUpperCase()} | refresh failed for STT`);
+    }
+  }
+
+  return result;
 }

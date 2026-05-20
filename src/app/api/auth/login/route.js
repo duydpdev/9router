@@ -9,6 +9,10 @@ import {
   recordSuccess,
   getClientIp,
 } from "@/lib/auth/loginLimiter";
+import {
+  verifyPasswordAgainstHash,
+  normalizePasswordForStorage,
+} from "@/lib/password";
 
 const RESET_HINT =
   "Forgot password? Reset to default via 9Router CLI → Settings → Reset Password to Default.";

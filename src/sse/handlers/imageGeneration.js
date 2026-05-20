@@ -93,7 +93,13 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allNeedReauth) {
+      if (credentials?.allNeedReauth) {
+        return errorResponse(
+          HTTP_STATUS.SERVICE_UNAVAILABLE,
+          `[${provider}/${model}] All connections need reauth — reconnect via dashboard.`,
+        );
+      }
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;

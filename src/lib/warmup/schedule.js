@@ -1,6 +1,6 @@
 // scheduledForUtc semantics:
 //   - Real-time tick: equals the cursor instant passed to findDueWarmupRuns.
-//   - Catch-up via findDueWarmupRunsInRange: equals the slot boundary (HH:00 UTC).
+//   - Catch-up via findDueWarmupRunsInRange: equals the minute slot boundary (HH:MM UTC).
 //   It is a SLOT IDENTIFIER, not wall-clock execution time. The runner records
 //   actual execution wall-clock as `actualRanAt`.
 
@@ -8,6 +8,8 @@ const DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh";
 const DAY_VALUES = new Set([0, 1, 2, 3, 4, 5, 6]);
 const MAX_PREVIEW_DAYS = 7;
 const MAX_RUN_HISTORY = 100;
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
 
 export function createDefaultWarmupSchedule() {
   return {
@@ -52,7 +54,7 @@ export function validateWarmupSchedules(input) {
     if (!isValidTimezone(schedule.timezone)) return { ok: false, error: `Invalid timezone: ${schedule.timezone}` };
     if (!schedule.days.length) return { ok: false, error: `${schedule.name}: select at least one day` };
     if (!schedule.times.length) return { ok: false, error: `${schedule.name}: select at least one time` };
-    if (hasInvalidRawTime(raw.times)) return { ok: false, error: `${schedule.name}: times must use HH:00` };
+    if (hasInvalidRawTime(raw.times)) return { ok: false, error: `${schedule.name}: times must use HH:MM (00:00 – 23:59)` };
     if (schedule.enabled && !schedule.providerConnectionIds.length) {
       return { ok: false, error: `${schedule.name}: select at least one provider account` };
     }
@@ -91,35 +93,47 @@ export function ceilToHour(input) {
   return d;
 }
 
+export function ceilToMinute(input) {
+  const d = new Date(input);
+  if (d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0) return d;
+  d.setUTCSeconds(0, 0);
+  d.setUTCMinutes(d.getUTCMinutes() + 1);
+  return d;
+}
+
 export function findDueWarmupRunsInRange(schedules, from, to) {
   const fromDate = new Date(from);
   const toDate = new Date(to);
   if (fromDate > toDate) return [];
   const results = [];
+  const seen = new Set();
   for (
-    let cursor = ceilToHour(fromDate);
+    let cursor = ceilToMinute(fromDate);
     cursor <= toDate;
-    cursor = new Date(cursor.getTime() + 3600 * 1000)
+    cursor = new Date(cursor.getTime() + MINUTE_MS)
   ) {
-    results.push(...findDueWarmupRuns(schedules, cursor));
+    for (const item of findDueWarmupRuns(schedules, cursor)) {
+      if (seen.has(item.dedupeKey)) continue;
+      seen.add(item.dedupeKey);
+      results.push(item);
+    }
   }
   results.sort((a, b) => a.scheduledForUtc.localeCompare(b.scheduledForUtc));
   return results;
 }
 
 export function buildWarmupPreview(schedules, now = new Date(), days = MAX_PREVIEW_DAYS) {
+  const normalized = normalizeWarmupSchedules(schedules);
   const preview = [];
-  const cursor = ceilToHour(now);
-  const hoursToScan = days * 24;
-  for (let step = 0; step <= hoursToScan; step += 1) {
-    const candidate = new Date(cursor.getTime() + step * 60 * 60 * 1000);
-    for (const item of findDueWarmupRuns(schedules, candidate)) {
-      const existing = preview.find((entry) => (
-        entry.scheduleId === item.schedule.id &&
-        entry.localDate === item.localDate &&
-        entry.localTime === item.localTime
-      ));
-      if (existing) continue;
+  const seen = new Set();
+  const start = ceilToMinute(now);
+  const totalMinutes = days * 24 * 60;
+  for (let step = 0; step <= totalMinutes; step += 1) {
+    const candidate = new Date(start.getTime() + step * MINUTE_MS);
+    for (const item of findDueWarmupRuns(normalized, candidate)) {
+      const key = `${item.schedule.id}:${item.localDate}:${item.localTime}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       preview.push({
         scheduleId: item.schedule.id,
         name: item.schedule.name,
@@ -130,6 +144,7 @@ export function buildWarmupPreview(schedules, now = new Date(), days = MAX_PREVI
         timezone: item.timezone,
       });
     }
+    if (preview.length >= 50) break;
   }
 
   return preview.slice(0, 50);
@@ -173,28 +188,32 @@ function normalizeDays(value) {
 
 function normalizeTimes(value) {
   return Array.from(new Set(
-    Array.isArray(value) ? value.map(normalizeHourlyTime).filter(Boolean) : []
+    Array.isArray(value) ? value.map(normalizeClockTime).filter(Boolean) : []
   )).sort((left, right) => left.localeCompare(right));
 }
 
-function normalizeHourlyTime(value) {
+// Accepts HH, HH:MM. Hour 0-23, minute 0-59. Returns "HH:MM" or null.
+function normalizeClockTime(value) {
   const text = String(value || "").trim();
+  if (!text) return null;
   const hourOnly = text.match(/^(\d{1,2})$/);
   if (hourOnly) {
     const hour = Number(hourOnly[1]);
     if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, "0")}:00`;
     return null;
   }
-  const match = text.match(/^(\d{1,2}):00$/);
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
   const hour = Number(match[1]);
+  const minute = Number(match[2]);
   if (hour < 0 || hour > 23) return null;
-  return `${String(hour).padStart(2, "0")}:00`;
+  if (minute < 0 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function hasInvalidRawTime(value) {
   if (!Array.isArray(value)) return false;
-  return value.some((time) => !normalizeHourlyTime(time));
+  return value.some((time) => !normalizeClockTime(time));
 }
 
 function isValidTimezone(timezone) {
@@ -220,10 +239,12 @@ function getLocalSlot(date, timezone) {
 
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const weekdayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  // Intl returns hour "24" at midnight in some engines/locales; normalize to "00".
+  const hour = map.hour === "24" ? "00" : map.hour;
 
   return {
     day: weekdayMap[map.weekday],
     localDate: `${map.year}-${map.month}-${map.day}`,
-    localTime: `${map.hour}:00`,
+    localTime: `${hour}:${map.minute}`,
   };
 }

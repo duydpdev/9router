@@ -9,6 +9,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
+import { checkAndRefreshToken } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
@@ -86,7 +87,13 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language) {
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allNeedReauth) {
+      if (credentials?.allNeedReauth) {
+        return errorResponse(
+          HTTP_STATUS.SERVICE_UNAVAILABLE,
+          `[${provider}/${model}] All connections need reauth — reconnect via dashboard.`,
+        );
+      }
       if (credentials?.allRateLimited) {
         const msg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
@@ -96,15 +103,21 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language) {
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 
-    log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
+    let refreshedCredentials = credentials;
+    try {
+      refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+    } catch (err) {
+      log.warn("AUTH", `Proactive refresh failed for ${provider}: ${err?.message ?? err}`);
+    }
+    log.info("AUTH", `\x1b[32mUsing ${provider} account: ${refreshedCredentials.connectionName}\x1b[0m`);
 
-    const result = await handleTtsCore({ provider, model, input: body.input, credentials, responseFormat, language });
+    const result = await handleTtsCore({ provider, model, input: body.input, credentials: refreshedCredentials, responseFormat, language });
 
     if (result.success) return result.response;
 
-    const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
+    const { shouldFallback } = await markAccountUnavailable(refreshedCredentials.connectionId, result.status, result.error, provider, model);
     if (shouldFallback) {
-      excludeConnectionIds.add(credentials.connectionId);
+      excludeConnectionIds.add(refreshedCredentials.connectionId);
       lastError = result.error;
       lastStatus = result.status;
       continue;

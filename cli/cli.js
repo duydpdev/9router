@@ -55,6 +55,43 @@ try { ensureSqliteRuntime({ silent: true }); } catch {}
 // Self-heal tray runtime (systray for macOS/Linux only). Windows skipped.
 try { ensureTrayRuntime({ silent: true }); } catch {}
 
+// Load user .env from persistent user-config dir. Next.js standalone reads
+// .env relative to its cwd (the bundled app/ dir inside the npm global
+// install), which is wiped on every `npm i -g 9router@latest`. Reading from
+// ~/.9router/.env (or %APPDATA%/9router/.env on Windows) survives upgrades
+// and matches the existing user-state convention (db.json, machine-id, etc.).
+// Existing process.env wins so shell exports + Docker --env-file still override.
+function loadUserEnvFile() {
+  try {
+    const dir = process.platform === "win32"
+      ? path.join(process.env.APPDATA || os.homedir(), "9router")
+      : path.join(os.homedir(), ".9router");
+    const envPath = path.join(dir, ".env");
+    if (!fs.existsSync(envPath)) return;
+    const text = fs.readFileSync(envPath, "utf8");
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+      if (process.env[key] !== undefined) continue;
+      let value = line.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      process.env[key] = value;
+    }
+  } catch {
+    // best-effort
+  }
+}
+loadUserEnvFile();
+
 // Configuration constants
 const APP_NAME = pkg.name; // Use from package.json
 const INSTALL_CMD_LATEST = `npm i -g ${APP_NAME}@latest --prefer-online`;

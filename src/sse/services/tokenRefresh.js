@@ -23,6 +23,44 @@ import {
   refreshKiroToken as _refreshKiroToken,
   getRefreshLeadMs as _getRefreshLeadMs
 } from "open-sse/services/tokenRefresh.js";
+import { isFatalRefreshFailure } from "../../lib/oauth/refresh-failure-classifier.js";
+import { markNeedsReauth, supportsAutomatedReauth } from "../../lib/oauth/reauth-state.js";
+import { notifyReauthRequired } from "../../lib/notifier/reauth-alert.js";
+
+const NOTIFY_TIMEOUT_MS = 2000;
+
+async function handleFatalRefresh(provider, creds, reason) {
+  const reauthAt = new Date().toISOString();
+  try {
+    await markNeedsReauth(creds.connectionId, {
+      reason,
+      reauthAt,
+      currentLastErrorType: creds.lastErrorType,
+    });
+  } catch (err) {
+    log.warn("REAUTH_NOTIFY", `markNeedsReauth failed: ${err?.message ?? err}`);
+    return;
+  }
+  const kind = supportsAutomatedReauth(creds) ? "reauth" : "manual_reimport_needed";
+  try {
+    await Promise.race([
+      notifyReauthRequired({
+        connection: {
+          id: creds.connectionId,
+          provider,
+          name: creds.connectionName ?? creds.name,
+          email: creds.email,
+        },
+        reason,
+        reauthAt,
+        kind,
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("notify_timeout_2s")), NOTIFY_TIMEOUT_MS)),
+    ]);
+  } catch (err) {
+    log.warn("REAUTH_NOTIFY", `Notify failed: ${err?.message ?? err}`);
+  }
+}
 
 export const TOKEN_EXPIRY_BUFFER_MS = BUFFER_MS;
 
@@ -118,7 +156,7 @@ function needsProjectId(provider) {
  * @param {string} connectionId
  * @param {string} accessToken
  */
-function _refreshProjectId(provider, connectionId, accessToken) {
+export function refreshProjectId(provider, connectionId, accessToken) {
   if (!needsProjectId(provider) || !connectionId || !accessToken) return;
 
   // Evict the stale cached entry so getProjectIdForConnection does a real fetch
@@ -218,7 +256,16 @@ export async function checkAndRefreshToken(provider, credentials) {
         refreshLeadMs: refreshLead,
       });
 
-      const newCreds = await getAccessToken(provider, creds);
+      let newCreds;
+      try {
+        newCreds = await getAccessToken(provider, creds);
+      } catch (err) {
+        const fatal = isFatalRefreshFailure(err);
+        if (fatal) await handleFatalRefresh(provider, creds, fatal);
+        else log.warn("TOKEN_REFRESH", `Transient refresh failure for ${provider}: ${err?.message ?? err}`);
+        return creds;
+      }
+
       if (newCreds?.accessToken) {
         const mergedCreds = {
           ...newCreds,
@@ -241,7 +288,12 @@ export async function checkAndRefreshToken(provider, credentials) {
         };
 
         // Non-blocking: refresh projectId with the new access token
-        _refreshProjectId(provider, creds.connectionId, creds.accessToken);
+        refreshProjectId(provider, creds.connectionId, creds.accessToken);
+      } else {
+        // Refresh returned no usable access token — classify the falsy/tagged
+        // result and trigger Case-B reauth path only when fatal.
+        const fatal = isFatalRefreshFailure(newCreds);
+        if (fatal) await handleFatalRefresh(provider, creds, fatal);
       }
     }
   }

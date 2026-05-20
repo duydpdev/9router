@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
@@ -26,6 +26,9 @@ function sleep(ms) {
 export default function ProviderDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const reconnectId = searchParams?.get("reconnect") ?? null;
+  const reconnectTriggeredRef = useRef(false);
   const providerId = params.id;
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -369,6 +372,29 @@ export default function ProviderDetailPage() {
     fetchAliases();
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchDisabledModels]);
+
+  // Auto-trigger OAuth flow when arriving via the reauth deep-link.
+  // Guarded by useRef to survive React Strict Mode double-effects and to
+  // strip the query param after the first run so a page refresh does not
+  // re-open the OAuth window.
+  useEffect(() => {
+    if (!reconnectId || reconnectTriggeredRef.current) return;
+    if (loading || connections.length === 0) return;
+
+    const target = connections.find((c) => c.id === reconnectId);
+    reconnectTriggeredRef.current = true;
+    if (!target) {
+      router.replace(window.location.pathname);
+      return;
+    }
+    // Only auto-trigger OAuth providers that support refresh — manual-reimport
+    // providers (Cursor/GitLab PAT/iFlow cookie) show inline instructions.
+    if (target.authType === "oauth" && target.refreshToken) {
+      triggerOAuthConnection();
+    }
+    router.replace(window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reconnectId, loading, connections]);
 
   // Fetch suggested models from provider's public API (if configured)
   useEffect(() => {
@@ -750,6 +776,15 @@ export default function ProviderDetailPage() {
                   setShowEditModal(true);
                 }}
                 onDelete={() => handleDelete(conn.id)}
+                onReconnect={() => {
+                  reconnectTriggeredRef.current = true;
+                  if (conn.authType === "oauth" && conn.refreshToken) {
+                    triggerOAuthConnection();
+                  }
+                  // Manual-reimport providers (Cursor/GitLab PAT/iFlow cookie)
+                  // show their existing inline import UI via the per-provider
+                  // CTA at the top of the page — no extra trigger needed.
+                }}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>

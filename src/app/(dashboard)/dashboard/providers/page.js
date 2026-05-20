@@ -27,12 +27,19 @@ import { useNotificationStore } from "@/store/notificationStore";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 
-function getStatusDisplay(connected, error, errorCode) {
+function getStatusDisplay(connected, error, errorCode, needsReauth = 0) {
   const parts = [];
   if (connected > 0) {
     parts.push(
       <Badge key="connected" variant="success" size="sm" dot>
         {connected} Connected
+      </Badge>,
+    );
+  }
+  if (needsReauth > 0) {
+    parts.push(
+      <Badge key="needs-reauth" variant="warning" size="sm" dot>
+        {needsReauth} Needs Reauth
       </Badge>,
     );
   }
@@ -54,6 +61,7 @@ function getStatusDisplay(connected, error, errorCode) {
 
 function getConnectionErrorTag(connection) {
   if (!connection) return null;
+  if (connection.needsReauth) return "REAUTH";
 
   const explicitType = connection.lastErrorType;
   if (explicitType === "runtime_error") return "RUNTIME";
@@ -167,6 +175,7 @@ export default function ProvidersPage() {
     );
 
     const getEffectiveStatus = (conn) => {
+      if (conn.needsReauth) return "needs_reauth";
       const isCooldown = Object.entries(conn).some(
         ([k, v]) =>
           k.startsWith("modelLock_") && v && new Date(v).getTime() > Date.now(),
@@ -181,6 +190,10 @@ export default function ProvidersPage() {
       return status === "active" || status === "success";
     }).length;
 
+    const needsReauth = providerConnections.filter(
+      (c) => getEffectiveStatus(c) === "needs_reauth",
+    ).length;
+
     const errorConns = providerConnections.filter((c) => {
       const status = getEffectiveStatus(c);
       return (
@@ -193,15 +206,20 @@ export default function ProvidersPage() {
     const allDisabled =
       total > 0 && providerConnections.every((c) => c.isActive === false);
 
+    const reauthConn = providerConnections.find((c) => c.needsReauth);
     const latestError = errorConns.sort(
       (a, b) => new Date(b.lastErrorAt || 0) - new Date(a.lastErrorAt || 0),
     )[0];
-    const errorCode = latestError ? getConnectionErrorTag(latestError) : null;
-    const errorTime = latestError?.lastErrorAt
-      ? getRelativeTime(latestError.lastErrorAt)
+    const errorCode = reauthConn
+      ? "REAUTH"
+      : latestError
+      ? getConnectionErrorTag(latestError)
+      : null;
+    const errorTime = (reauthConn?.reauthAt || latestError?.lastErrorAt)
+      ? getRelativeTime(reauthConn?.reauthAt || latestError.lastErrorAt)
       : null;
 
-    return { connected, error, total, errorCode, errorTime, allDisabled };
+    return { connected, error, needsReauth, total, errorCode, errorTime, allDisabled };
   };
 
   // Toggle all connections for a provider on/off
@@ -593,7 +611,7 @@ export default function ProvidersPage() {
 }
 
 function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
-  const { connected, error, errorCode, errorTime, allDisabled } = stats;
+  const { connected, error, needsReauth, errorCode, errorTime, allDisabled } = stats;
   const isNoAuth = !!provider.noAuth;
 
   const dotColors = {
@@ -650,7 +668,7 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
                   <Badge variant="success" size="sm" dot>Ready</Badge>
                 ) : (
                   <>
-                    {getStatusDisplay(connected, error, errorCode)}
+                    {getStatusDisplay(connected, error, errorCode, needsReauth)}
                     {errorTime && (
                       <span className="text-text-muted">{errorTime}</span>
                     )}
@@ -709,7 +727,7 @@ function ApiKeyProviderCard({
   authType,
   onToggle,
 }) {
-  const { connected, error, errorCode, errorTime, allDisabled } = stats;
+  const { connected, error, needsReauth, errorCode, errorTime, allDisabled } = stats;
   const isCompatible = providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
   const isAnthropicCompatible = providerId.startsWith(
     ANTHROPIC_COMPATIBLE_PREFIX,
@@ -776,7 +794,7 @@ function ApiKeyProviderCard({
                   </Badge>
                 ) : (
                   <>
-                    {getStatusDisplay(connected, error, errorCode)}
+                    {getStatusDisplay(connected, error, errorCode, needsReauth)}
                     {isCompatible && (
                       <Badge variant="default" size="sm">
                         {provider.apiType === "responses"

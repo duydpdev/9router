@@ -196,7 +196,14 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
     // All accounts unavailable
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allNeedReauth) {
+      if (credentials?.allNeedReauth) {
+        log.warn("CHAT", `[${provider}/${model}] all accounts need reauth`);
+        return errorResponse(
+          HTTP_STATUS.SERVICE_UNAVAILABLE,
+          `[${provider}/${model}] All connections need reauth — reconnect via dashboard.`,
+        );
+      }
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;

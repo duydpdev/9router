@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import { Badge, Toggle } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, onReconnect, oneByOneStatus = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -102,17 +102,27 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     };
   }, [modelLockUntil]);
 
-  // Determine effective status (override unavailable if cooldown expired)
-  const effectiveStatus = (connection.testStatus === "unavailable" && !isCooldown)
-    ? "active"  // Cooldown expired u2192 treat as active
-    : connection.testStatus;
+  // Determine effective status — needsReauth takes precedence over everything
+  // except an explicit disabled toggle (handled in display below).
+  const effectiveStatus = connection.needsReauth
+    ? "needs_reauth"
+    : (connection.testStatus === "unavailable" && !isCooldown)
+      ? "active"  // Cooldown expired u2192 treat as active
+      : connection.testStatus;
+
+  const supportsAutoReauth = !!connection.refreshToken && connection.authType === "oauth";
 
   const getStatusVariant = () => {
     if (connection.isActive === false) return "default";
+    if (effectiveStatus === "needs_reauth") return "warning";
     if (effectiveStatus === "active" || effectiveStatus === "success") return "success";
     if (effectiveStatus === "error" || effectiveStatus === "expired" || effectiveStatus === "unavailable") return "error";
     return "default";
   };
+
+  const reauthLabel = connection.needsReauth
+    ? (supportsAutoReauth ? "Needs Reauth" : "Manual Re-import")
+    : null;
 
   const getOneByOneVariant = () => {
     if (!oneByOneStatus) return "default";
@@ -157,8 +167,15 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate">{displayName}</p>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
-            <Badge variant={getStatusVariant()} size="sm" dot>
-              {connection.isActive === false ? "disabled" : (effectiveStatus || "Unknown")}
+            <Badge
+              variant={getStatusVariant()}
+              size="sm"
+              dot
+              title={connection.needsReauth ? `Reason: ${connection.reauthReason || "unknown"} · ${connection.reauthAt || ""}` : undefined}
+            >
+              {connection.isActive === false
+                ? "disabled"
+                : (effectiveStatus === "needs_reauth" ? reauthLabel : (effectiveStatus || "Unknown"))}
             </Badge>
             <Badge variant="default" size="sm">
               {authLabel}
@@ -239,6 +256,16 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               )}
             </div>
           )}
+          {connection.needsReauth && onReconnect && (
+            <button
+              onClick={() => onReconnect(connection)}
+              className="flex flex-col items-center rounded px-2 py-1 text-amber-500 hover:bg-amber-500/10"
+              title={supportsAutoReauth ? "Reconnect via OAuth" : "Re-import token manually"}
+            >
+              <span className="material-symbols-outlined text-[18px]">refresh</span>
+              <span className="text-[10px] leading-tight">{supportsAutoReauth ? "Reconnect" : "Re-import"}</span>
+            </button>
+          )}
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
             <span className="material-symbols-outlined text-[18px]">edit</span>
             <span className="text-[10px] leading-tight">Edit</span>
@@ -271,6 +298,11 @@ ConnectionRow.propTypes = {
     lastError: PropTypes.string,
     priority: PropTypes.number,
     globalPriority: PropTypes.number,
+    needsReauth: PropTypes.bool,
+    reauthReason: PropTypes.string,
+    reauthAt: PropTypes.string,
+    authType: PropTypes.string,
+    refreshToken: PropTypes.string,
   }).isRequired,
   proxyPools: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,
@@ -288,6 +320,7 @@ ConnectionRow.propTypes = {
   onUpdateProxy: PropTypes.func,
   onEdit: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
+  onReconnect: PropTypes.func,
   oneByOneStatus: PropTypes.shape({
     state: PropTypes.string,
     error: PropTypes.string,

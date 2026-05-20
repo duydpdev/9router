@@ -256,11 +256,16 @@ function truncate(text, max) {
 
 // red-team #4: belt-and-suspenders — neuter @everyone/@here/role-mention literals
 // even though allowed_mentions:{parse:[]} already disarms them server-side.
-function sanitizeDiscordMentions(text) {
+export function sanitizeDiscordMentions(text) {
   return String(text ?? "")
     .replace(/@everyone/gi, "@​everyone")
     .replace(/@here/gi, "@​here")
     .replace(/<@(!|&)?(\d+)>/g, "<@​$1$2>");
+}
+
+// Reauth alert reuses the same dispatcher (proxy + connection pool) as warmup.
+export function getNotifierDispatcher() {
+  return getDispatcher(getNotifierConfig().proxyUrl);
 }
 
 // red-team #4: Discord — allowed_mentions parse=[], truncate error to 1500, total≤2000.
@@ -434,7 +439,7 @@ async function sendJson(url, payload, dispatcher) {
   return res;
 }
 
-async function sendDiscord(payload, url, dispatcher) {
+export async function sendDiscord(payload, url, dispatcher) {
   if (!(await isHostSendable(url))) {
     return { ok: false, statusCode: null, reason: "private_target_blocked" };
   }
@@ -446,7 +451,7 @@ async function sendDiscord(payload, url, dispatcher) {
   }
 }
 
-async function sendTelegram(payload, token, chatId, dispatcher) {
+export async function sendTelegram(payload, token, chatId, dispatcher) {
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   // host is api.telegram.org → public; DNS-recheck still applied
   if (!(await isHostSendable(url))) {
@@ -460,7 +465,7 @@ async function sendTelegram(payload, token, chatId, dispatcher) {
   }
 }
 
-async function sendGeneric(payload, url, dispatcher) {
+export async function sendGeneric(payload, url, dispatcher) {
   if (!(await isHostSendable(url))) {
     return { ok: false, statusCode: null, reason: "private_target_blocked" };
   }

@@ -1,5 +1,73 @@
 import http from "http";
 import { URL } from "url";
+import crypto from "node:crypto";
+import { loadJwtSecret } from "@/lib/auth/dashboardSession";
+
+// Signed-state OAuth helpers ───────────────────────────────────────────────
+// Encodes optional `connectionId` into the OAuth `state` parameter and signs
+// the payload with the dashboard JWT secret. The state round-trips through
+// the IdP unchanged; the exchange handler decodes + verifies before binding
+// new tokens to an existing connection row.
+//
+// Why HMAC and not a server-side store: 9/12 providers do NOT use the
+// stateful Codex/xAI proxy session map — `state` is the only channel that
+// survives the IdP redirect. Verifying via HMAC keeps the design stateless
+// for Vercel/Docker single-instance deployments.
+
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
+let _signedStateSecret = null;
+function getSignedStateSecret() {
+  if (_signedStateSecret) return _signedStateSecret;
+  _signedStateSecret = loadJwtSecret();
+  return _signedStateSecret;
+}
+
+export function signOAuthState({ connectionId } = {}) {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const payload = `${connectionId || ""}|${nonce}|${Date.now()}`;
+  const sig = crypto
+    .createHmac("sha256", getSignedStateSecret())
+    .update(payload)
+    .digest("base64url");
+  return `${Buffer.from(payload).toString("base64url")}.${sig}`;
+}
+
+export function verifyOAuthState(state, { maxAgeMs = OAUTH_STATE_MAX_AGE_MS } = {}) {
+  if (!state || typeof state !== "string" || !state.includes(".")) return null;
+  const idx = state.lastIndexOf(".");
+  const payloadB64 = state.slice(0, idx);
+  const sig = state.slice(idx + 1);
+
+  let payloadBuf;
+  try {
+    payloadBuf = Buffer.from(payloadB64, "base64url");
+    if (!payloadBuf.length) return null;
+  } catch {
+    return null;
+  }
+  const expected = crypto
+    .createHmac("sha256", getSignedStateSecret())
+    .update(payloadBuf)
+    .digest("base64url");
+  let expectedBuf;
+  let sigBuf;
+  try {
+    expectedBuf = Buffer.from(expected);
+    sigBuf = Buffer.from(sig);
+  } catch {
+    return null;
+  }
+  if (expectedBuf.length !== sigBuf.length) return null;
+  if (!crypto.timingSafeEqual(expectedBuf, sigBuf)) return null;
+
+  const parts = payloadBuf.toString("utf8").split("|");
+  if (parts.length !== 3) return null;
+  const [connectionId, nonce, tsStr] = parts;
+  const ts = Number(tsStr);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  if (Date.now() - ts > maxAgeMs) return null;
+  return { connectionId: connectionId || null, nonce, ts };
+}
 
 /**
  * Start a local HTTP server to receive OAuth callback

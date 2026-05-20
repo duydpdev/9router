@@ -92,7 +92,7 @@ export async function refreshAccessToken(provider, refreshToken, credentials, lo
         status: response.status,
         error: errorText,
       });
-      return null;
+      return { error: "refresh_failed", status: response.status, body: errorText };
     }
 
     const tokens = await response.json();
@@ -137,7 +137,7 @@ export async function refreshClaudeOAuthToken(refreshToken, log) {
     if (!response.ok) {
       const errorText = await response.text();
       log?.error?.("TOKEN_REFRESH", "Failed to refresh Claude OAuth token", { status: response.status, error: errorText });
-      return null;
+      return { error: "refresh_failed", status: response.status, body: errorText };
     }
 
     const tokens = await response.json();
@@ -171,7 +171,7 @@ export async function refreshGoogleToken(refreshToken, clientId, clientSecret, l
     if (!response.ok) {
       const errorText = await response.text();
       log?.error?.("TOKEN_REFRESH", "Failed to refresh Google token", { status: response.status, error: errorText });
-      return null;
+      return { error: "refresh_failed", status: response.status, body: errorText };
     }
 
     const tokens = await response.json();
@@ -472,7 +472,7 @@ export async function refreshGitHubToken(refreshToken, log) {
       status: response.status,
       error: errorText,
     });
-    return null;
+    return { error: "refresh_failed", status: response.status, body: errorText };
   }
 
   const tokens = await response.json();

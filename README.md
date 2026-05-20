@@ -459,6 +459,26 @@ Seamless translation between formats:
 - OAuth tokens automatically refresh before expiration
 - No manual re-authentication needed
 - Seamless experience across all providers
+- TTS / STT requests now run the same proactive refresh as chat / embeddings / image / search / fetch
+- Mid-stream `401 / 403` triggers one refresh-and-retry per request (per-handler `executor.refreshCredentials`)
+
+#### 🔔 Provider Auto Re-Login (when refresh tokens die)
+
+When a connection's refresh token is permanently rejected (`invalid_grant`, Codex family rotation, etc.), 9Router:
+
+- marks the connection `needsReauth=true` and skips it in combo fallback so requests hop to the next account instantly
+- fires a single Discord / Telegram / Generic webhook with a 1-click deep-link via the existing warmup notifier
+- the deep-link auto-opens the OAuth flow for that exact connection — token re-binds to the original row (no duplicate connections, no project-id refetch loop)
+
+Required env (reuses warmup notifier vars):
+
+| Variable | Notes |
+|----------|-------|
+| `WARMUP_NOTIFY_ENABLED=true` | master gate (shared with warmup notifier) |
+| `WARMUP_NOTIFY_DISCORD_WEBHOOK` | Discord webhook URL |
+| `WARMUP_NOTIFY_TELEGRAM_BOT_TOKEN` + `WARMUP_NOTIFY_TELEGRAM_CHAT_ID` | Telegram |
+| `WARMUP_NOTIFY_GENERIC_WEBHOOK_URL` | generic JSON receiver |
+| `PUBLIC_BASE_URL` | base URL for the reconnect deep-link (cloud / Docker — falls back to a path-only link if unset) |
 
 ### 🎨 Custom Combos
 

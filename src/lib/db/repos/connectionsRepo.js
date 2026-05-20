@@ -2,12 +2,13 @@ import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 
-const OPTIONAL_FIELDS = [
+export const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
   "accessToken", "refreshToken", "expiresAt", "tokenType",
   "scope", "projectId", "apiKey", "testStatus",
-  "lastTested", "lastError", "lastErrorAt", "rateLimitedUntil", "expiresIn", "errorCode",
+  "lastTested", "lastError", "lastErrorAt", "lastErrorType", "rateLimitedUntil", "expiresIn", "errorCode",
   "consecutiveUseCount",
+  "needsReauth", "reauthReason", "reauthAt", "reauthNotifiedAt",
 ];
 
 function rowToConn(row) {
@@ -169,6 +170,25 @@ export async function updateProviderConnection(id, data) {
   return result;
 }
 
+// Atomic compare-and-update — predicate runs against the current row inside
+// the same transaction. Returns the updated row on success, false if the row
+// is missing or predicate returns false. Used by reauth dedup CAS.
+export async function compareAndUpdateProviderConnection(id, predicate, data) {
+  const db = await getAdapter();
+  let result = false;
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) return;
+    const existing = rowToConn(row);
+    if (!predicate(existing)) return;
+    const merged = { ...existing, ...data, updatedAt: new Date().toISOString() };
+    upsert(db, merged);
+    if (data.priority !== undefined) reorderInTx(db, existing.provider);
+    result = merged;
+  });
+  return result;
+}
+
 // Cascade: strip deleted connection IDs from kv['warmup','schedules']. Called
 // inside an existing db.transaction so the connection delete + schedule scrub
 // are atomic.
@@ -232,13 +252,11 @@ export async function reorderProviderConnections(providerId) {
 
 export async function cleanupProviderConnections() {
   const db = await getAdapter();
-  const fieldsToCheck = [
-    "displayName", "email", "globalPriority", "defaultModel",
-    "accessToken", "refreshToken", "expiresAt", "tokenType",
-    "scope", "projectId", "apiKey", "testStatus",
-    "lastTested", "lastError", "lastErrorAt", "rateLimitedUntil", "expiresIn",
-    "consecutiveUseCount",
-  ];
+  // Single source of truth — reauth fields (needsReauth, reauthReason, reauthAt,
+  // reauthNotifiedAt) are intentionally listed here so that a row mid-reauth
+  // keeps the flag once `markNeedsReauth` runs but its null defaults still get
+  // pruned on legacy rows.
+  const fieldsToCheck = OPTIONAL_FIELDS;
   let cleaned = 0;
   db.transaction(() => {
     const rows = db.all(`SELECT * FROM providerConnections`);

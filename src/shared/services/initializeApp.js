@@ -34,6 +34,12 @@ import {
   removeAllDNSEntriesSync,
 } from "@/mitm/manager";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
+import {
+  cleanupProviderConnections,
+  getSettings,
+  updateSettings,
+  getApiKeys,
+} from "@/lib/localDb";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {

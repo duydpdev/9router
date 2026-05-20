@@ -152,7 +152,14 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
   while (true) {
     const credentials = await getProviderCredentials(providerId, excludeConnectionIds);
 
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allNeedReauth) {
+      if (credentials?.allNeedReauth) {
+        log.warn("FETCH", `[${providerId}] all accounts need reauth`);
+        return errorResponse(
+          HTTP_STATUS.SERVICE_UNAVAILABLE,
+          `[${providerId}] All connections need reauth — reconnect via dashboard.`,
+        );
+      }
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
