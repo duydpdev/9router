@@ -63,15 +63,7 @@ export async function POST(request) {
     // Default password is '123456' if not set
     const storedHash = settings.password;
 
-    console.log("[LOGIN DEBUG] password received:", JSON.stringify(password));
-    console.log(
-      "[LOGIN DEBUG] storedHash:",
-      storedHash ? `hash(${storedHash.length} chars)` : "none"
-    );
-    console.log("[LOGIN DEBUG] authMode:", settings.authMode);
-
     if (settings.authMode === "oidc" && isOidcConfigured(settings)) {
-      console.log("[LOGIN DEBUG] blocked: OIDC mode");
       return NextResponse.json(
         { error: "Password login is disabled. Use OIDC sign in." },
         { status: 403 }
@@ -81,25 +73,18 @@ export async function POST(request) {
     let isValid = false;
     if (storedHash) {
       isValid = await verifyPasswordAgainstHash(password, storedHash);
-      console.log("[LOGIN DEBUG] bcrypt verify result:", isValid);
     } else {
       // Use env var or default
       const initialPassword = process.env.INITIAL_PASSWORD || "123456";
       const normalized = normalizePasswordForStorage(password);
       const normalizedInitial = normalizePasswordForStorage(initialPassword);
       isValid = normalized === normalizedInitial;
-      console.log("[LOGIN DEBUG] no hash, comparing defaults:", {
-        normalized,
-        normalizedInitial,
-        isValid,
-      });
     }
 
     if (isValid) {
       recordSuccess(ip);
       const cookieStore = await cookies();
       await setDashboardAuthCookie(cookieStore, request);
-      console.log("[LOGIN DEBUG] login SUCCESS");
       return NextResponse.json({ success: true });
     }
 

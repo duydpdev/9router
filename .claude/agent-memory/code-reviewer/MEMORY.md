@@ -1,0 +1,1 @@
+- [Claude session-id fingerprint invariant](project_claude_session_id_invariant.md) — body metadata.user_id.session_id must match X-Claude-Code-Session-Id header (OAuth)

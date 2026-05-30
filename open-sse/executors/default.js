@@ -3,6 +3,7 @@ import { PROVIDERS, resolveXiaomiTokenplanBaseUrl } from "../config/providers.js
 import { OAUTH_ENDPOINTS, buildKimiHeaders } from "../config/appConstants.js";
 import { buildClineHeaders } from "../../src/shared/utils/clineAuth.js";
 import { getCachedClaudeHeaders } from "../utils/claudeHeaderCache.js";
+import { deriveSessionId } from "../utils/sessionManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 
@@ -110,6 +111,25 @@ export class DefaultExecutor extends BaseExecutor {
             }
           }
           Object.assign(headers, cached);
+        }
+        // Claude Code's 5-hour interactive session window only opens for
+        // requests carrying x-claude-code-session-id. Real client requests
+        // bring it via the cached headers above; synthetic/warmup traffic
+        // (cold header cache) omits it and never warms the session.
+        //
+        // Only inject for OAuth tokens (where applyCloaking also writes a body
+        // metadata.user_id.session_id) and reuse deriveSessionId on the same
+        // connectionId so the header MATCHES the body session_id — keeping the
+        // fingerprint consistent. Skip when a real client header is present.
+        const isOAuthClaude =
+          !credentials.apiKey && credentials.accessToken?.includes("sk-ant-oat");
+        if (
+          isOAuthClaude &&
+          credentials.connectionId &&
+          !headers["x-claude-code-session-id"] &&
+          !headers["X-Claude-Code-Session-Id"]
+        ) {
+          headers["x-claude-code-session-id"] = deriveSessionId(credentials.connectionId);
         }
         credentials.apiKey
           ? (headers["x-api-key"] = credentials.apiKey)
