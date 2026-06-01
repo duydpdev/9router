@@ -1,0 +1,20 @@
+# fail2ban filter — 9router app audit log, PROBE events only.
+# Bans hosts that flood probe-path scans (kind:"probe"), e.g. mass /.env,
+# /wp-admin, /phpmyadmin sweeps. Each blocked event is one JSON line:
+#   {"ts":"...","ip":"<addr>","kind":"probe","reason":"...","path":"...","ua":"..."}
+#
+# The IP is anchored to its fixed 2nd-field position (right after "ts") and the
+# match requires kind:"probe" as the 3rd field. This is deliberate: the trailing
+# "reason"/"path"/"ua" fields are attacker-controlled, so a greedy match could
+# latch onto a forged "ip":"..." injected inside a user-agent. Anchoring +
+# field-order matching defeats that. (Couples to the ts→ip→kind field order in
+# src/lib/security/auditLog.js — keep in sync.)
+#
+# SECURITY: same caveat as 9router.filter. ONLY trust this filter's banned IP
+# when 9router runs behind a reverse proxy that SETS X-Forwarded-For
+# (botProtection.trustProxy=true). When directly exposed, the logged IP is
+# client-forgeable — ban off the nginx access log instead (see 9router.jail).
+
+[Definition]
+failregex = ^\{"ts":"[^"]*","ip":"<HOST>","kind":"probe",
+ignoreregex =

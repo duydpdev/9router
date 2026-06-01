@@ -47,6 +47,17 @@ const DEFAULT_SETTINGS = {
     blockAiCrawlers: true,
     rateLimit: { enabled: true, limit: 300, windowMs: 60000 },
     llmRateLimit: { enabled: true, limit: 120, windowMs: 60000, keyLimit: 1200, keyWindowMs: 60000 },
+    // Per-key daily budget monitor (alert-only — never blocks/disables). After
+    // each request's usage is recorded, today's per-key token+request totals are
+    // checked; crossing warnAtPercent then 100% fires a webhook alert, re-alerting
+    // every reAlertHours while still over.
+    keyBudget: {
+      enabled: true,
+      tokenPerDay: 5_000_000, // trip when today's promptTokens+completionTokens for a key exceeds this
+      requestPerDay: 5000, // OR when today's request count exceeds this
+      warnAtPercent: 80, // early-alert tier before 100%
+      reAlertHours: 4, // re-alert cadence while a key stays over
+    },
   },
 };
 

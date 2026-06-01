@@ -281,9 +281,41 @@ export async function saveRequestUsage(entry) {
 
     pushToRing(entry);
     statsEmitter.emit("update");
+    // Payload-carrying event for the per-key budget monitor. Decoupled so this
+    // repo never imports security code (the monitor subscribes at boot). Carries
+    // the raw key by design — it stays in-process; the monitor masks it before
+    // any alert leaves the box.
+    statsEmitter.emit("usage", { apiKey: entry.apiKey, status: entry.status });
   } catch (e) {
     console.error("Failed to save usage stats:", e);
   }
+}
+
+// Today's per-key totals for the per-key budget monitor. O(1): reads the one
+// pre-aggregated usageDaily row for the current local day (PK lookup) and sums
+// the byApiKey entries whose composite key (`${apiKey}|model|provider`) starts
+// with this apiKey. NOT a usageHistory scan and NOT SUM(tokens) — usageHistory
+// stores tokens as a JSON TEXT column, so a SQL SUM there returns 0. The day
+// row is already local-day-scoped, so there is no UTC-vs-local timestamp window
+// bug. Match on `apiKey + "|"` (not bare startsWith) so one key cannot collide
+// with another key that has it as a prefix.
+export async function getTodayUsageForKey(apiKey) {
+  if (!apiKey) return { tokens: 0, requests: 0 };
+  const db = await getAdapter();
+  const dateKey = getLocalDateKey();
+  const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+  if (!row) return { tokens: 0, requests: 0 };
+  const day = parseJson(row.data, {});
+  const prefix = apiKey + "|";
+  let tokens = 0;
+  let requests = 0;
+  for (const [k, v] of Object.entries(day.byApiKey || {})) {
+    if (k.startsWith(prefix)) {
+      tokens += (v.promptTokens || 0) + (v.completionTokens || 0);
+      requests += v.requests || 0;
+    }
+  }
+  return { tokens, requests };
 }
 
 export async function getUsageHistory(filter = {}) {

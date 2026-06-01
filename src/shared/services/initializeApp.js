@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 import { existsSync } from "fs";
 
 import { startWarmupScheduler } from "@/lib/warmup/scheduler";
+import { initKeyBudgetMonitor } from "@/lib/security/keyBudget";
 
 import {
   enableTunnel,
@@ -137,6 +138,10 @@ export async function initializeApp() {
     startNetworkMonitor();
 
     startWarmupScheduler();
+
+    // Subscribe the per-key daily budget monitor to the post-completion usage
+    // event (idempotent — guarded against double-registration).
+    initKeyBudgetMonitor();
 
     // Auto-start MITM if it was enabled before restart
     autoStartMitm();

@@ -17,6 +17,35 @@ map $http_user_agent $9r_bad_ua {
     ~*(sqlmap|nikto|masscan|zgrab|nmap|nessus|acunetix|wpscan)  1;
 }
 
+# ───────────────────────────────────────────────────────────────────────────
+# EDGE HARDENING (web-scrape defense) — all OPT-IN. Keyless bots scraping the
+# dashboard/web pages are the target. The /v1 SDK API is deliberately carved
+# out below and is NEVER challenged or denied by any of this (CI / serverless /
+# VPS clients legitimately originate from datacenter ASNs).
+# ───────────────────────────────────────────────────────────────────────────
+
+# --- Datacenter / cloud ASN flag (OPT-IN, requires ngx_http_geoip2_module +
+#     a MaxMind GeoLite2-ASN.mmdb). Uncomment the geoip2 block and the map.
+#     This flag is consumed ONLY inside web location blocks — never for /v1. ---
+# geoip2 /etc/nginx/geoip/GeoLite2-ASN.mmdb {
+#     auto_reload 60m;
+#     $geoip2_asn autonomous_system_number;
+# }
+# map $geoip2_asn $9r_datacenter_asn {
+#     default     0;
+#     16509       1;   # AWS
+#     14618       1;   # AWS
+#     15169       1;   # Google Cloud
+#     8075        1;   # Microsoft / Azure
+#     16276       1;   # OVH
+#     24940       1;   # Hetzner
+#     14061       1;   # DigitalOcean
+#     20473       1;   # Vultr / Choopa
+#     # Allowlist note: legitimate datacenter/VPN users (corporate egress, some
+#     # mobile carriers) also live on these ASNs. Map specific ASNs back to 0,
+#     # or scope the deny to specific paths, before enabling in production.
+# }
+
 server {
     listen 80;
     server_name your-domain.example;
@@ -38,7 +67,35 @@ server {
     location ~* /\.(env|git|aws)        { return 444; }
     location ~* /(wp-login\.php|wp-admin|phpmyadmin|xmlrpc\.php) { return 444; }
 
+    # ── /v1 SDK carve-out (HARD INVARIANT) ───────────────────────────────────
+    # MUST come first and `^~` so it wins over the regex/web blocks below. The
+    # /v1 API is authenticated by API key and called by SDKs that often run from
+    # datacenter ASNs (CI, serverless, VPS) — it is NEVER Turnstile-challenged
+    # and NEVER ASN-denied. Do not add any deny/challenge logic in here.
+    location ^~ /v1 {
+        proxy_pass http://127.0.0.1:20128;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;   # long-lived SSE streams
+    }
+
+    # ── Dashboard login: Cloudflare Turnstile (OPT-IN) ───────────────────────
+    # Gate ONLY the keyless login page against bot scraping. Two ways:
+    #   (a) Front the whole site with Cloudflare and enable a Turnstile/Managed
+    #       Challenge rule scoped to `/login` — simplest, no nginx change.
+    #   (b) Validate a Turnstile token at the edge with njs/auth_request.
+    # Either way: API-key auth and /v1 are never challenged (carve-out above).
+    # location = /login {
+    #     # auth_request /__turnstile_verify;   # njs/subrequest validating cf-turnstile-response
+    #     proxy_pass http://127.0.0.1:20128;
+    # }
+
+    # ── Web / dashboard routes: datacenter-ASN deny (OPT-IN, web-only) ────────
+    # The ASN deny lives ONLY here, never at server scope and never for /v1, so
+    # cloud-sourced SDK traffic is unaffected. Requires the geoip2 map above.
     location / {
+        # if ($9r_datacenter_asn) { return 444; }   # uncomment with geoip2 enabled
         proxy_pass http://127.0.0.1:20128;
         proxy_http_version 1.1;
         proxy_set_header Upgrade    $http_upgrade;

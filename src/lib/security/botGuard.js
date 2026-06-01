@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import crypto from "node:crypto";
-import { getSettings, validateApiKey } from "@/lib/localDb";
+import { validateApiKey } from "@/lib/localDb";
 import { isStaticAsset, classifyRequest } from "./botRules.js";
 import { check } from "./rateLimiter.js";
 import { getTrustedClientIp } from "./clientIp.js";
 import { logBlocked } from "./auditLog.js";
+import { keyHash } from "./keyHash.js";
+import { getCachedBotSettings, __test__ as botSettingsCacheTest } from "./botSettingsCache.js";
 import {
   isLocalRequest,
   hasValidCliToken,
@@ -12,24 +13,6 @@ import {
   isPublicLlmApi,
   extractApiKey,
 } from "@/dashboardGuard";
-
-// Short, stable bucket id for a validated key — never the raw key.
-function keyHash(k) {
-  return crypto.createHash("sha256").update(k).digest("hex").slice(0, 16);
-}
-
-// ~5s settings cache. botGuard runs on the hot /v1 path, which otherwise does
-// no settings read — avoid a sqlite hit per proxied request.
-let _cache = null;
-let _cacheAt = 0;
-async function getCachedBotSettings(now = Date.now) {
-  const t = now();
-  if (_cache && t - _cacheAt < 5000) return _cache;
-  const s = await getSettings();
-  _cache = s?.botProtection || null;
-  _cacheAt = t;
-  return _cache;
-}
 
 function block403(reason) {
   return NextResponse.json({ error: "Forbidden", reason }, { status: 403 });
@@ -151,8 +134,5 @@ async function rateLimitGlobal(g, request, { ip, ua, pathname }) {
 }
 
 export const __test__ = {
-  resetCache: () => {
-    _cache = null;
-    _cacheAt = 0;
-  },
+  resetCache: () => botSettingsCacheTest.resetCache(),
 };

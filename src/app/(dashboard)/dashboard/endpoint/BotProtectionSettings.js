@@ -2,6 +2,7 @@
 
 import PropTypes from "prop-types";
 import { Card, Toggle, Input } from "@/shared/components";
+import { toPositiveInt, clampPercent, shouldShowChannelWarning } from "./bot-protection-settings-helpers";
 
 // Sub-toggles shown under the master switch. Order matches the bot guard's
 // classification precedence (probe → bad-UA → ai-crawler) plus the proxy-trust
@@ -13,21 +14,19 @@ const SUB_TOGGLES = [
   { key: "trustProxy", label: "Trust X-Forwarded-For", desc: "Enable ONLY behind a reverse proxy that sets the header — otherwise the client IP is forgeable." },
 ];
 
-function toPositiveInt(value, fallback) {
-  const n = parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-export default function BotProtectionSettings({ value, onChange }) {
+export default function BotProtectionSettings({ value, onChange, notifierEnabled = false }) {
   if (!value) return null;
 
   const set = (patch) => onChange({ ...value, ...patch });
   const setRate = (patch) => onChange({ ...value, rateLimit: { ...value.rateLimit, ...patch } });
   const setLlm = (patch) => onChange({ ...value, llmRateLimit: { ...value.llmRateLimit, ...patch } });
+  const setBudget = (patch) => onChange({ ...value, keyBudget: { ...value.keyBudget, ...patch } });
 
   const on = value.enabled !== false;
   const rate = value.rateLimit || {};
   const llm = value.llmRateLimit || {};
+  const budget = value.keyBudget || {};
+  const budgetOn = budget.enabled !== false;
 
   return (
     <Card id="bot-protection">
@@ -74,6 +73,54 @@ export default function BotProtectionSettings({ value, onChange }) {
               onChange={(e) => setLlm({ keyLimit: toPositiveInt(e.target.value, llm.keyLimit) })}
             />
           </div>
+
+          {/* Per-key daily budget monitor — alert-only, never blocks. */}
+          <div className="flex items-center justify-between pt-4 border-t border-border gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Per-key daily budget alerts</p>
+              <p className="text-sm text-text-muted">
+                Webhook alert when a single API key crosses its daily token / request budget. Alert-only — never blocks or disables the key.
+              </p>
+            </div>
+            <Toggle checked={budgetOn} onChange={() => setBudget({ enabled: !budgetOn })} />
+          </div>
+
+          {budgetOn && (
+            <>
+              {shouldShowChannelWarning(budgetOn, notifierEnabled) && (
+                <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-600 dark:text-amber-400">
+                  <span className="material-symbols-outlined align-middle text-base mr-1">warning</span>
+                  No notifier channel is active — budget alerts will be silently dropped. Set <code>WARMUP_NOTIFY_ENABLED=true</code> and configure a Discord / Telegram / generic webhook to receive them.
+                </div>
+              )}
+              <div className="flex flex-wrap items-end gap-4 pt-4">
+                <Input
+                  label="Tokens / day / key"
+                  type="number"
+                  value={budget.tokenPerDay ?? ""}
+                  onChange={(e) => setBudget({ tokenPerDay: toPositiveInt(e.target.value, budget.tokenPerDay) })}
+                />
+                <Input
+                  label="Requests / day / key"
+                  type="number"
+                  value={budget.requestPerDay ?? ""}
+                  onChange={(e) => setBudget({ requestPerDay: toPositiveInt(e.target.value, budget.requestPerDay) })}
+                />
+                <Input
+                  label="Warn at (%)"
+                  type="number"
+                  value={budget.warnAtPercent ?? ""}
+                  onChange={(e) => setBudget({ warnAtPercent: clampPercent(e.target.value, budget.warnAtPercent) })}
+                />
+                <Input
+                  label="Re-alert every (hours)"
+                  type="number"
+                  value={budget.reAlertHours ?? ""}
+                  onChange={(e) => setBudget({ reAlertHours: toPositiveInt(e.target.value, budget.reAlertHours) })}
+                />
+              </div>
+            </>
+          )}
         </>
       )}
     </Card>
@@ -83,4 +130,5 @@ export default function BotProtectionSettings({ value, onChange }) {
 BotProtectionSettings.propTypes = {
   value: PropTypes.object,
   onChange: PropTypes.func.isRequired,
+  notifierEnabled: PropTypes.bool,
 };

@@ -28,3 +28,19 @@ findtime = 600
 maxretry = 5
 bantime  = 3600
 banaction = iptables-multiport
+
+# ── OPTIONAL: probe-flood jail off the 9router app audit log ──────────────────
+# Bans hosts that flood probe-path scans (kind:"probe"). DISABLED BY DEFAULT and
+# SAME forgeable-IP caveat as [9router-app]: enable ONLY behind a trusted reverse
+# proxy with botProtection.trustProxy=true. On a direct-exposed deploy the logged
+# IP is attacker-controlled, so banning off it DoSes spoofed-XFF victims — prefer
+# the [9router-nginx] access-log jail above (real socket IP). Adjust logpath to
+# your DATA_DIR (docker: /app/data/logs/bot-blocked.log; npx/pm2: ~/.9router/...).
+[9router-probe]
+enabled  = false
+filter   = 9router-probe
+logpath  = /root/.9router/logs/bot-blocked.log
+findtime = 600
+maxretry = 8
+bantime  = 7200
+banaction = iptables-multiport

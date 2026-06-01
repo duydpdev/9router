@@ -71,6 +71,7 @@ export default function APIPageClient({ machineId }) {
   const [cavemanEnabled, setCavemanEnabled] = useState(false);
   const [cavemanLevel, setCavemanLevel] = useState("full");
   const [botProtection, setBotProtection] = useState(null);
+  const [notifierEnabled, setNotifierEnabled] = useState(false);
 
   // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
@@ -243,6 +244,7 @@ export default function APIPageClient({ machineId }) {
         setCavemanEnabled(!!data.cavemanEnabled);
         setCavemanLevel(data.cavemanLevel || "full");
         setBotProtection(data.botProtection || null);
+        setNotifierEnabled(data.notifierEnabled === true);
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -1104,7 +1106,7 @@ export default function APIPageClient({ machineId }) {
       </Card>
 
       {/* Bot Protection */}
-      <BotProtectionSettings value={botProtection} onChange={handleBotProtection} />
+      <BotProtectionSettings value={botProtection} onChange={handleBotProtection} notifierEnabled={notifierEnabled} />
 
       {/* API Keys */}
       <Card id="require-api-key">

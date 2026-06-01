@@ -7,6 +7,7 @@ import {
   normalizePasswordForStorage,
   verifyPasswordAgainstHash,
 } from "@/lib/password";
+import { getNotifierConfig } from "@/lib/warmup/notifier";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,11 +24,22 @@ export async function GET() {
     
     const enableRequestLogs = process.env.ENABLE_REQUEST_LOGS === "true";
     const enableTranslator = process.env.ENABLE_TRANSLATOR === "true";
-    
-    return NextResponse.json({ 
-      ...safeSettings, 
+
+    // Surfaced so the Bot Protection UI can warn when per-key budget alerts are
+    // enabled but no notifier channel is live (alerts would be silently dead).
+    // Env-driven + frozen at first read; never exposes the webhook URLs/tokens.
+    let notifierEnabled = false;
+    try {
+      notifierEnabled = getNotifierConfig().enabled === true;
+    } catch {
+      notifierEnabled = false;
+    }
+
+    return NextResponse.json({
+      ...safeSettings,
       enableRequestLogs,
       enableTranslator,
+      notifierEnabled,
       hasPassword: !!password
     }, { headers: SETTINGS_RESPONSE_HEADERS });
   } catch (error) {
