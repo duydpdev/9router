@@ -5,8 +5,10 @@ const DEFAULT_MAX_BYTES = 500 * 1024 * 1024; // 500MB
 /**
  * In-memory, byte-bounded, LRU prompt cache.
  *
- * Eviction is least-recently-used by `lastAccess` timestamp (O(n) scan on
- * insert — acceptable for a default-OFF feature). TTL is enforced lazily on
+ * Eviction is least-recently-used by a monotonic `accessSeq` counter (O(n) scan
+ * on insert — acceptable for a default-OFF feature). A counter rather than a
+ * wall-clock timestamp keeps recency ordering correct even when many ops land
+ * in the same millisecond. TTL is enforced lazily on
  * `get()`; there is no background sweep, so the cache has zero side effects at
  * rest. `get()` returns a structuredClone so a caller mutating the result can
  * never corrupt a cached body.

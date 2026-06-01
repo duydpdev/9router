@@ -47,6 +47,9 @@ describe("embeddings route cache wiring", () => {
     expect(upstreamCalls).toBe(1);
     // body identical between miss and hit
     expect(await r1.clone().json()).toEqual(await r2.clone().json());
+    // hit must carry the same CORS header a miss does (browser parity)
+    expect(r2.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(r2.headers.get("Content-Type")).toBe("application/json");
   });
 
   it("different input order → cache miss (strict array)", async () => {

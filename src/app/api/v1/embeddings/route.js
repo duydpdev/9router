@@ -47,9 +47,17 @@ export async function POST(request) {
     });
     const hit = getPromptCache().get(cacheKey);
     if (hit) {
+      // Mirror the headers a fresh success response carries (see
+      // embeddingsCore success path) so a cache hit is indistinguishable from a
+      // miss to the client — notably CORS, which a browser caller needs on
+      // EVERY response, not just misses.
       return new Response(JSON.stringify(hit), {
         status: 200,
-        headers: { "Content-Type": "application/json", "x-router-cache-hit": "true" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "x-router-cache-hit": "true",
+        },
       });
     }
   } else if (directive.bypassReason) {
