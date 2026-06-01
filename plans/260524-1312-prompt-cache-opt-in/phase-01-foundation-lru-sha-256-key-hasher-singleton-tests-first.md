@@ -1,13 +1,15 @@
 ---
 phase: 1
 title: "Foundation (LRU + SHA-256 key hasher + singleton + tests-first)"
-status: pending
+status: completed
 priority: P2
 effort: "4-5h"
 dependencies: []
 ---
 
 # Phase 1: Foundation
+
+> ⚠️ **Body below is the PRE-red-team draft (doubly-linked-list LRU, `setInterval` TTL sweep, `__resetForTests()`, 4 split test files). It is SUPERSEDED by `## Red Team Adjustments` at the bottom** (Map+lastAccess, lazy expire only, public `clear()`, single test file). Implement from the Adjustments section. Body retained for traceability only.
 
 ## Overview
 

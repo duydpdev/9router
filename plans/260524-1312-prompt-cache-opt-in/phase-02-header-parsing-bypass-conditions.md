@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Header Parsing + Bypass Conditions"
-status: pending
+status: completed
 priority: P2
 effort: "2-3h"
 dependencies: [1]
@@ -264,6 +264,31 @@ parseCacheDirective(req, body, kind)   // kind: "chat" | "embeddings"
 ```
 
 For v1 (`kind === "embeddings"`), skip the tools/temperature/stream checks entirely.
+
+### Embeddings-specific bypass: tokenized input + oversize input (findings #10)
+
+`parseCacheDirective` (this module) OWNS all bypass logic — including embeddings input checks. Phase 4 consumes, does not define them. For `kind === "embeddings"`:
+
+```js
+const isTokenInput = (input) => {
+  if (Array.isArray(input) && input.length > 0) {
+    const first = input[0];
+    if (typeof first === "number") return true;                          // number[]
+    if (Array.isArray(first) && typeof first[0] === "number") return true; // number[][]
+  }
+  return false;
+};
+
+// inside parseCacheDirective, embeddings branch, after header opt-in confirmed:
+if (isTokenInput(body.input)) {
+  return { enabled: false, ttl: 0, bypassReason: "tokenized_input" };
+}
+if (JSON.stringify(body.input).length > 100_000) {                       // 100KB hash-input cap
+  return { enabled: false, ttl: 0, bypassReason: "oversize_input" };
+}
+```
+
+Add directive tests for both: `tokenized_input` (`input: [1,2,3]`) and `oversize_input` (`input: "x".repeat(100001)`).
 
 ### Effort revised
 

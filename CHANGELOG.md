@@ -1,6 +1,14 @@
 # Unreleased
 
 ## Features
+- Opt-in embeddings cache via `x-router-cache: ttl=<seconds>` header.
+  In-memory LRU, default 500MB budget (`PROMPT_CACHE_MAX_BYTES` override).
+  Strict key (model + input + encoding_format + dimensions). Automatic bypass
+  on `no-store`, tokenized input (number arrays), or input >100KB. Wired into
+  `/v1/embeddings` only (chat deferred). Disabled by default — no header means
+  unchanged behavior. NOT compatible with serverless (in-memory only —
+  Vercel/Lambda cold starts clear the cache). See
+  `docs/integrations/prompt-cache.md`.
 - Provider auto re-auth: detect dead refresh tokens (Case B — `invalid_grant`,
   Codex `refresh_token_reused`, etc.), mark the connection `needsReauth=true`,
   send a single Discord / Telegram / Generic webhook with a 1-click reconnect

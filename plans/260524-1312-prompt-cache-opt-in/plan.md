@@ -1,7 +1,7 @@
 ---
 title: "Opt-In Prompt Cache (in-memory LRU, header-driven)"
 description: "Opt-in prompt-level cache via per-request header. In-memory LRU, strict key (model+messages+temp+max_tokens+tools), bypass on tools/temperature, streaming opt-in. Default OFF — zero impact on existing clients."
-status: pending
+status: completed
 priority: P2
 branch: "feature/dylan-improve"
 tags: ["cache", "performance", "cost-savings", "sse"]
@@ -24,12 +24,12 @@ Identical prompts hammered repeatedly (test loops, lint cycles, warm-up patterns
 
 | Phase | Name                                                                                            | Status  |
 | ----- | ----------------------------------------------------------------------------------------------- | ------- |
-| 1     | [Foundation (LRU + SHA-256 key hasher + singleton + tests-first)](./phase-01-foundation-lru-sha-256-key-hasher-singleton-tests-first.md) — **see Red Team: Map+lastAccess, no setInterval, public clear()** | Pending |
-| 2     | [Header Parsing + Bypass Conditions](./phase-02-header-parsing-bypass-conditions.md) — **see Red Team: Headers API, undefined-temp bypass** | Pending |
+| 1     | [Foundation (LRU + SHA-256 key hasher + singleton + tests-first)](./phase-01-foundation-lru-sha-256-key-hasher-singleton-tests-first.md) — **see Red Team: Map+lastAccess, no setInterval, public clear()** | Completed |
+| 2     | [Header Parsing + Bypass Conditions](./phase-02-header-parsing-bypass-conditions.md) — **see Red Team: Headers API, undefined-temp bypass** | Completed |
 | 3     | [Wire into chat handler](./phase-03-wire-into-chat-handler.md) — **CANCELLED v1** per Red Team #1, #2, #3, #6 | Cancelled |
-| 4     | [Wire into embeddings handler](./phase-04-wire-into-embeddings-handler.md) — **see Red Team: at route layer, handle Response shape, token-array bypass** | Pending |
+| 4     | [Wire into embeddings handler](./phase-04-wire-into-embeddings-handler.md) — **see Red Team: at route layer, handle Response shape, token-array bypass** | Completed |
 | 5     | [Streaming cache opt-in (chunk replay)](./phase-05-streaming-cache-opt-in-chunk-replay.md) — **CANCELLED v1** per Red Team #4, #12 | Cancelled |
-| 6     | [Docs + E2E benchmark](./phase-06-docs-e2e-benchmark.md) — **see Red Team: embeddings-only, document serverless limitation** | Pending |
+| 6     | [Docs + E2E benchmark](./phase-06-docs-e2e-benchmark.md) — **see Red Team: embeddings-only, document serverless limitation** | Completed |
 
 ## Dependencies
 
@@ -205,3 +205,14 @@ Test file naming: `tests/unit/prompt-cache-<feature>.test.js`.
   - `result.body` / `result.ok` → `response.json()` from cloned Response
 - **Unresolved contradictions:** 0
 - **Status:** Plan adjustments authoritative. Phase 3 + 5 marked cancelled. Original body retained for traceability; `## Red Team Adjustments — 2026-05-24` sections in each phase supersede conflicting earlier prose.
+
+### Post-review fix pass — 2026-06-02
+
+Second-pass audit caught issues the red-team + sweep missed (new findings, not reversals):
+
+1. **CRITICAL — Phase 4 return-shape bug.** Route-layer wrap assumed `handleEmbeddings` returns `{ success, response }` and gated caching on `result.success`. Verified `src/sse/handlers/embeddings.js:135,147` → `handleEmbeddings` returns a **raw `Response`**; `{ success, response }` is the inner `handleEmbeddingsCore` shape (`open-sse/handlers/embeddingsCore.js:117-125`). With the wrong shape `result.success` is `undefined` → cache `set()` never runs → 0% hit, silent. Fixed: gate on `response.ok`, `response.clone().json()`. Test mock corrected to return raw `Response` (was re-introducing the finding-#15 test/prod divergence).
+2. **Frontmatter deps stale.** Phase 4 `dependencies: [1,2,3]` → `[1,2]` (3 cancelled). Phase 6 `[1,2,3,4,5]` → `[1,2,4]` (3,5 cancelled).
+3. **Bypass ownership.** `isTokenInput` + 100KB `oversize_input` cap now defined in Phase 2 (`parseCacheDirective` module owns all bypass) with tests; Phase 4 reduced to a consumer pointer.
+4. **Stale-body readability.** Added superseded-banner to Phase 1/4/6 headers so cook implements from `## Red Team Adjustments`, not the retained pre-review draft.
+
+**Unresolved contradictions after fix pass:** 0.

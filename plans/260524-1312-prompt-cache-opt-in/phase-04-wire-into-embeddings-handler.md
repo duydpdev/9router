@@ -1,13 +1,15 @@
 ---
 phase: 4
 title: "Wire into embeddings handler"
-status: pending
+status: completed
 priority: P2
 effort: "2-3h"
-dependencies: [1, 2, 3]
+dependencies: [1, 2]
 ---
 
 # Phase 4: Wire into embeddings handler
+
+> ⚠️ **Body below is the PRE-red-team draft (handler-layer wrap, separate `extractCacheKeyEmbeddings`, phantom `upstream-dispatch` mock, `__resetForTests()`). It is SUPERSEDED by `## Red Team Adjustments` at the bottom** (route-layer wrap at `src/app/api/v1/embeddings/route.js`, unified `hashKey`, raw-`Response` return shape, `clear()`). Implement from the Adjustments section. Body retained for traceability only.
 
 ## Overview
 
@@ -182,42 +184,30 @@ export async function POST(request) {
     headers: request.headers,
     body: JSON.stringify(body),
   });
-  const result = await handleEmbeddings(newRequest);
+  // CRITICAL: handleEmbeddings returns a RAW Response (not { success, response }).
+  // { success, response } is the shape of the INNER handleEmbeddingsCore in open-sse/.
+  // The route wraps the OUTER handleEmbeddings → check response.ok, clone+json to read.
+  const response = await handleEmbeddings(newRequest);
 
-  // result = { success, response: Response }
-  if (directive.enabled && result.success && cacheKey) {
-    const clone = result.response.clone();
-    const cachedBody = await clone.json();
+  if (directive.enabled && response.ok && cacheKey) {
+    const cachedBody = await response.clone().json();
     getPromptCache().set(cacheKey, cachedBody, directive.ttl);
-    // attach hit:false header to original response
+    // re-emit body + hit:false header (clone already consumed for caching)
     return new Response(JSON.stringify(cachedBody), {
       status: 200,
-      headers: { ...Object.fromEntries(result.response.headers), "x-router-cache-hit": "false" },
+      headers: { ...Object.fromEntries(response.headers), "x-router-cache-hit": "false" },
     });
   }
-  return result.response;
+  return response;
 }
 ```
 
-### Token-array input bypass (finding #10)
+**Return-shape invariant (verified `src/sse/handlers/embeddings.js:135,147` + error paths):**
+`handleEmbeddings` returns a `Response` directly — success via `errorResponse`/`unavailableResponse` is also a `Response` with non-200 status. Use `response.ok` (200-only) to gate caching, NOT `result.success`. The `{ success, response }` envelope lives one layer down in `handleEmbeddingsCore` (`open-sse/handlers/embeddingsCore.js:117-125`) and never surfaces at the route.
 
-```js
-const isTokenInput = (input) => {
-  if (Array.isArray(input) && input.length > 0) {
-    const first = input[0];
-    if (typeof first === "number") return true;             // number[]
-    if (Array.isArray(first) && typeof first[0] === "number") return true;  // number[][]
-  }
-  return false;
-};
+### Token-array input bypass (finding #10) — DEFINED IN PHASE 2
 
-// In parseCacheDirective for "embeddings" kind:
-if (isTokenInput(body.input)) {
-  return { enabled: false, ttl: 0, bypassReason: "tokenized_input" };
-}
-```
-
-Plus: bypass when `JSON.stringify(body.input).length > 100_000` (100KB cap on hash input to avoid CPU spike).
+`isTokenInput` + the 100KB `oversize_input` cap live in `parseCacheDirective` (Phase 2 module `cache-directive.js`), not here. Phase 4 only consumes the directive: when `directive.enabled === false` with `bypassReason` `tokenized_input` / `oversize_input`, the route falls through to `handleEmbeddings` with no cache touch. See Phase 2 → "Embeddings-specific bypass" for the spec + tests.
 
 ### Drop `extractCacheKeyEmbeddings` (finding from Scope Critic #5)
 
@@ -225,19 +215,20 @@ Use unified `hashKey()` from Phase 1 (already updated to handle null fields). No
 
 ### Test mock pattern fixed (finding #5)
 
-Mock `handleEmbeddings` directly, not the phantom `upstream-dispatch`:
+Mock `handleEmbeddings` directly, not the phantom `upstream-dispatch`. Mock MUST return a **raw `Response`** (matches real return shape — see Return-shape invariant above). Returning `{ success, response }` here re-introduces the exact test/prod divergence finding #15 warns about:
 
 ```js
 vi.mock("@/sse/handlers/embeddings.js", () => ({
-  handleEmbeddings: vi.fn(async () => ({
-    success: true,
-    response: new Response(JSON.stringify({
+  handleEmbeddings: vi.fn(async () =>
+    new Response(JSON.stringify({
       object: "list",
       data: [{ embedding: [0.1, 0.2, 0.3] }],
-    }), { headers: { "Content-Type": "application/json" } }),
-  })),
+    }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  ),
 }));
 ```
+
+> Also fix the stale snippet in `## TDD — failing tests first` above: it mocks the phantom `@/sse/services/upstream-dispatch` and calls `getPromptCache().__resetForTests()`. Use the mock above + `getPromptCache().clear()`.
 
 ### Deployment topology disclaimer (finding #11)
 

@@ -1,13 +1,15 @@
 ---
 phase: 6
 title: "Docs + E2E benchmark"
-status: pending
+status: completed
 priority: P2
 effort: "3-4h"
-dependencies: [1, 2, 3, 4, 5]
+dependencies: [1, 2, 4]
 ---
 
 # Phase 6: Docs + E2E benchmark
+
+> ⚠️ **Body below is the PRE-red-team draft (chat + streaming scope). It is SUPERSEDED by `## Red Team Adjustments` at the bottom of this file (embeddings-only).** When implementing, follow the Adjustments section; the Overview/Requirements/TDD prose here references cancelled chat/streaming E2E, `__resetForTests()`, and `scripts/cache-bench.js` — all dropped. Retained for traceability only.
 
 ## Overview
 
