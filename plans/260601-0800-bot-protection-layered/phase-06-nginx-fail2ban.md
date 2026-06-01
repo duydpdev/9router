@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Nginx & Fail2ban"
-status: pending
+status: completed
 priority: P2
 effort: "2h"
 dependencies: [3]
@@ -29,36 +29,42 @@ deploy/
 docs/bot-protection.md             # operator guide: layers, install, tuning, log path
 ```
 
-- fail2ban `failregex` must match exact JSON shape from Phase-3 `auditLog.js` — **lock the log format in Phase 3 first**, then write regex against real sample lines.
-- Document log path resolution: pm2 cwd `workspace/9router/logs/`, docker volume mount, npx `~/.9router/logs` (confirm actual). Keep consistent with Phase 3 decision.
+- fail2ban `failregex` matches the Phase-3 audit JSON via **named field captures** (`"ip":"<HOST>"` extracted by field name, anchored `^`) — NOT positional/field-order dependent (a future object-key reorder must not silently break bans). Capture-by-name + `^` anchor also rejects attacker-injected mid-line forgery.
+- **Ban-target safety (depends on `trustProxy`):** the IP in the app audit log is only trustworthy when `botProtection.trustProxy=true` (behind nginx that overwrites XFF). For **direct-exposed** deploys, a forged `X-Forwarded-For` lets an attacker write a victim IP into the log → fail2ban would ban the victim. **Therefore: docs MUST instruct fail2ban to ban off NGINX's own access/error log (real socket IP) — the app audit log is detection signal, not the ban source — UNLESS the operator runs behind a trusted proxy with `trustProxy=true`.** Mark the app-log jail "proxy-mode only."
+- **Audit log path = `${getDataDir()}/logs/bot-blocked.log`** (Phase 3). Resolution per mode (verified): npx/pm2 → `~/.9router/logs/bot-blocked.log` (or `$DATA_DIR/logs/...`); docker → `/app/data/logs/bot-blocked.log` (volume `9router-data:/app/data`, see `start.sh`). fail2ban `logpath` + docker tailing must point here.
 - README deploy section: link `docs/bot-protection.md`.
+
+## Verified Codebase Facts (grounded 2026-06-01)
+- **No `deploy.sh`.** Ship script is `start.sh` (docker entrypoint, cwd `/app/data`, volume `9router-data:/app/data`). pm2/VPS is documented in README but not scripted.
+- `getDataDir()` (`src/lib/dataDir.js`) is the single path authority; `next.config.mjs:44` already excludes `logs/` from the webpack watcher.
 
 ## Related Code Files
 - Create: `deploy/nginx/9router.conf.example`
 - Create: `deploy/fail2ban/9router.filter`
 - Create: `deploy/fail2ban/9router.jail`
 - Create: `docs/bot-protection.md`
-- Modify: `README.md` (deploy section link) + optionally `GUIDE.md`
-- Read for context: Phase-3 `auditLog.js` output format, `deploy.sh` (server paths: `workspace/9router`)
+- Modify: `README.md` (deploy section link)
+- Read for context: Phase-3 `auditLog.js` output format, `start.sh` (docker cwd `/app/data`, volume), `src/lib/dataDir.js` (path resolution)
 
 ## Implementation Steps
-1. Capture a real audit-log sample line (from Phase 3 / Phase 4 tests).
-2. Write `9router.filter` `failregex` against that exact line; validate with `fail2ban-regex` mentally / note the test command.
-3. Write `9router.jail` (maxretry, findtime, bantime, banaction).
+1. Capture a **real** audit-log sample line emitted by Phase-3 `auditLog.js` (generate a fixture from the actual appender, not hand-written) — `9router.filter` depends on Phase 4 producing real blocks too.
+2. Write `9router.filter` `failregex` with named field captures (`<HOST>` from `"ip":"..."`, anchored `^`). **Validate executably:** `fail2ban-regex <sample-fixture> 9router.filter` must report 1 match; document this as a CI/check command (not "mentally").
+3. Write `9router.jail` (maxretry, findtime, bantime, banaction). Default jail = **nginx-log-based** (real socket IP); ship a second commented "app-log jail (trustProxy=true only)" block.
 4. Write `9router.conf.example` nginx block (rate zone, conn limit, UA map, probe deny → 444).
 5. Write `docs/bot-protection.md`: architecture diagram, two-layer split, install steps, log path per mode, logrotate, tuning defaults, single-instance caveat.
 6. Link from README.
 
 ## Success Criteria
 - [ ] Templates copy-paste ready, commented, no secrets
-- [ ] fail2ban `failregex` matches actual Phase-3 audit line (verified against sample)
-- [ ] Docs cover all 3 deploy modes + log path + logrotate + caveats
+- [ ] `failregex` uses named `<HOST>` capture, anchored `^`; passes `fail2ban-regex` against a real Phase-3 fixture line (executable, not mental)
+- [ ] Default jail bans off nginx log (real IP); app-log jail clearly marked "trustProxy=true only"
+- [ ] Docs cover all deploy modes + `${getDataDir()}/logs/` path + logrotate + the XFF/trustProxy ban-safety caveat
 - [ ] README links the guide
 
 ## Risk Assessment
 - **Audit-log format drift** between Phase 3 and the regex → write regex against captured real line; if format changes, update filter (note the coupling in docs).
 - **Operators without nginx/fail2ban** → clearly marked optional; app layer already protects. No package dependency on these files.
-- **Wrong log path per deploy mode** → enumerate each mode explicitly; cross-check with Phase 3 path decision + `deploy.sh`.
+- **Wrong log path per deploy mode** → all modes resolve via `getDataDir()`; enumerate npx/pm2 (`~/.9router/logs/`) vs docker (`/app/data/logs/`) explicitly; cross-check `start.sh` volume.
 
 ## Out of Scope
 - No automatic fail2ban install/config from the app — operator runs it manually per docs.

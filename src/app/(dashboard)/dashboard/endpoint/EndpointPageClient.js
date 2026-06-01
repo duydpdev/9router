@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
 import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import BotProtectionSettings from "./BotProtectionSettings";
 
 const TUNNEL_BENEFITS = [
   { icon: "public", title: "Access Anywhere", desc: "Use your API from any network" },
@@ -69,6 +70,7 @@ export default function APIPageClient({ machineId }) {
   const [rtkEnabled, setRtkEnabledState] = useState(true);
   const [cavemanEnabled, setCavemanEnabled] = useState(false);
   const [cavemanLevel, setCavemanLevel] = useState("full");
+  const [botProtection, setBotProtection] = useState(null);
 
   // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
@@ -240,6 +242,7 @@ export default function APIPageClient({ machineId }) {
         setRtkEnabledState(data.rtkEnabled !== false);
         setCavemanEnabled(!!data.cavemanEnabled);
         setCavemanLevel(data.cavemanLevel || "full");
+        setBotProtection(data.botProtection || null);
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -317,6 +320,13 @@ export default function APIPageClient({ machineId }) {
   const handleCavemanEnabled = (value) => {
     setCavemanEnabled(value);
     patchSetting({ cavemanEnabled: value });
+  };
+
+  // botProtection is a nested object; send the whole object so updateSettings'
+  // top-level merge doesn't drop sibling sub-fields.
+  const handleBotProtection = (next) => {
+    setBotProtection(next);
+    patchSetting({ botProtection: next });
   };
 
   const handleCavemanLevel = (level) => {
@@ -1092,6 +1102,9 @@ export default function APIPageClient({ machineId }) {
           </div>
         </div>
       </Card>
+
+      {/* Bot Protection */}
+      <BotProtectionSettings value={botProtection} onChange={handleBotProtection} />
 
       {/* API Keys */}
       <Card id="require-api-key">

@@ -153,6 +153,7 @@ Usage DB:
 - API key generation/verification: `src/shared/utils/apiKey.js`
 - Provider secrets persisted in `providerConnections` entries
 - Optional proxy support for upstream calls via env proxy variables (`open-sse/utils/proxyFetch.js`)
+- Bot protection (runs first in `proxy()` before auth): `src/lib/security/botGuard.js` + `botRules.js`/`rateLimiter.js`/`auditLog.js`; probe/scanner/AI-crawler blocking + per-IP & per-key rate limiting; settings under `settings.botProtection`; optional nginx/fail2ban booster in `deploy/`. See `docs/bot-protection.md`.
 
 ## 5) Cloud Sync
 

@@ -45,8 +45,6 @@ export function recordSuccess(ip) {
   attempts.delete(ip);
 }
 
-export function getClientIp(request) {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return request.headers.get("x-real-ip") || "unknown";
-}
+// Single source of truth lives in security/clientIp.js; re-exported here so
+// existing importers (login route) keep their import path.
+export { getClientIp } from "../security/clientIp.js";

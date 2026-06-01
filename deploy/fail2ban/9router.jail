@@ -1,0 +1,30 @@
+# 9router fail2ban jail. Copy into /etc/fail2ban/jail.d/9router.conf and put
+# 9router.filter in /etc/fail2ban/filter.d/. Reload: fail2ban-client reload.
+
+# ── DEFAULT (recommended): ban off the NGINX access log ──────────────────────
+# Uses the REAL socket IP nginx sees, so it is safe even when clients can forge
+# X-Forwarded-For. Requires the nginx booster (deploy/nginx/9router.conf.example)
+# returning 444 for scanners/probes. Uses the stock nginx-style matching.
+[9router-nginx]
+enabled  = true
+port     = http,https
+filter   = nginx-limit-req
+logpath  = /var/log/nginx/access.log
+findtime = 600
+maxretry = 10
+bantime  = 3600
+banaction = iptables-multiport
+
+# ── OPTIONAL: ban off the 9router app audit log ──────────────────────────────
+# ENABLE ONLY when 9router runs behind a trusted reverse proxy AND
+# botProtection.trustProxy=true — otherwise the logged IP is forgeable and an
+# attacker can get an arbitrary victim IP banned. Adjust logpath to your
+# DATA_DIR (docker: /app/data/logs/bot-blocked.log; npx/pm2: ~/.9router/logs/...).
+[9router-app]
+enabled  = false
+filter   = 9router
+logpath  = /root/.9router/logs/bot-blocked.log
+findtime = 600
+maxretry = 5
+bantime  = 3600
+banaction = iptables-multiport

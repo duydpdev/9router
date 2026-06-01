@@ -1,0 +1,18 @@
+# fail2ban filter for the 9router app audit log (${DATA_DIR}/logs/bot-blocked.log).
+# Each blocked event is one JSON line:
+#   {"ts":"...","ip":"<addr>","kind":"probe|bad-ua|ai-crawler|rate","reason":"...","path":"...","ua":"..."}
+#
+# The IP is anchored to its fixed 2nd-field position (right after "ts"). This is
+# deliberate: the trailing "ua"/"path" fields are attacker-controlled, so a
+# greedy match could otherwise latch onto a forged "ip":"..." injected inside a
+# user-agent. Anchoring defeats that. (Note: this couples the regex to the
+# ts-then-ip field order in src/lib/security/auditLog.js — keep them in sync.)
+#
+# SECURITY: only trust this filter's banned IP when 9router runs behind a reverse
+# proxy that SETS X-Forwarded-For (botProtection.trustProxy=true). When directly
+# exposed, the logged IP is client-forgeable — ban off the nginx access log
+# instead (see 9router.jail / docs/bot-protection.md).
+
+[Definition]
+failregex = ^\{"ts":"[^"]*","ip":"<HOST>",
+ignoreregex =

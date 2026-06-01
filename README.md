@@ -1112,6 +1112,12 @@ docker pull decolua/9router:latest   # update to latest
 
 **Data persistence:** `$HOME/.9router/db/data.sqlite` on host ↔ `/app/data/db/data.sqlite` in container.
 
+### Bot Protection
+
+9router ships layered bot defense (probe-path / scanner-UA / AI-crawler blocking + per-IP and per-key rate limiting), on by default and toggleable in **Dashboard → Endpoint → Bot Protection**. For internet-exposed deploys, an optional nginx + fail2ban booster is provided as templates in `deploy/`.
+
+See **[docs/bot-protection.md](./docs/bot-protection.md)** for setup, the `X-Forwarded-For` / `trustProxy` security note, log paths per deploy mode, and tuning.
+
 ### Environment Variables
 
 | Variable | Default | Description |

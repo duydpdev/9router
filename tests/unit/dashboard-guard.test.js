@@ -238,7 +238,6 @@ describe("dashboard guard helpers", () => {
     const apiRequest = request("/v1/chat/completions", {
       authorization: "Bearer bearer-key",
       "x-api-key": "header-key",
-      z,
     });
 
     expect(__test__.extractApiKey(apiRequest)).toBe("bearer-key");

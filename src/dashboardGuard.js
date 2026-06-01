@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { botGuard } from "@/lib/security/botGuard";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -172,7 +173,22 @@ export const __test__ = {
   canAccessLocalOnlyRoute,
 };
 
+// Reused by the bot-protection guard (src/lib/security/botGuard.js) — single
+// source of truth for request classification helpers (DRY).
+export {
+  isLocalRequest,
+  hasValidApiKey,
+  hasValidCliToken,
+  isAuthenticated,
+  isPublicLlmApi,
+  extractApiKey,
+};
+
 export async function proxy(request) {
+  // Bot protection runs first, before any auth/routing.
+  const botBlock = await botGuard(request);
+  if (botBlock) return botBlock;
+
   const { pathname } = request.nextUrl;
 
   // Local-only gate for spawn-capable / host-secret routes.

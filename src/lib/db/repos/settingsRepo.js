@@ -36,7 +36,38 @@ const DEFAULT_SETTINGS = {
   rtkEnabled: true,
   cavemanEnabled: false,
   cavemanLevel: "full",
+  // Layered bot protection. Defaults ON; loopback + valid key always exempt.
+  // trustProxy=false means x-forwarded-for is treated as untrusted (direct-exposed
+  // npx/docker); set true only behind a reverse proxy that sets the header.
+  botProtection: {
+    enabled: true,
+    trustProxy: false,
+    blockProbePaths: true,
+    blockBadUA: true,
+    blockAiCrawlers: true,
+    rateLimit: { enabled: true, limit: 300, windowMs: 60000 },
+    llmRateLimit: { enabled: true, limit: 120, windowMs: 60000, keyLimit: 1200, keyWindowMs: 60000 },
+  },
 };
+
+// Keys whose default is a nested object with sub-defaults that must survive a
+// partial user override (shallow spread would clobber siblings). Only
+// botProtection needs this — the other object-valued keys are user-populated maps.
+const NESTED_DEFAULT_KEYS = ["botProtection"];
+
+function isPlainObject(v) {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+// One-level-recursive merge of a default object with a user override.
+function deepMergeDefaults(def, override) {
+  if (!isPlainObject(override)) return { ...def };
+  const out = { ...def };
+  for (const [k, v] of Object.entries(override)) {
+    out[k] = isPlainObject(def[k]) && isPlainObject(v) ? deepMergeDefaults(def[k], v) : v;
+  }
+  return out;
+}
 
 async function readRaw() {
   const db = await getAdapter();
@@ -59,6 +90,10 @@ function mergeWithDefaults(raw) {
         merged[key] = defVal;
       }
     }
+  }
+  // Nested-object keys: preserve sub-defaults under a partial user override.
+  for (const key of NESTED_DEFAULT_KEYS) {
+    merged[key] = deepMergeDefaults(DEFAULT_SETTINGS[key], raw?.[key]);
   }
   return merged;
 }
@@ -102,3 +137,5 @@ export async function getCloudUrl() {
 export async function exportSettings() {
   return await readRaw();
 }
+
+export const __test__ = { mergeWithDefaults };
