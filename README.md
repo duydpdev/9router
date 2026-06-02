@@ -119,6 +119,28 @@ Default URLs:
 
 ---
 
+## 🔌 MCP Control-Plane
+
+Ask 9Router about itself from inside Claude Desktop (or any stdio MCP client) —
+"which providers are healthy?", "what's today's usage?" — via three read-only
+introspection tools (`router.list_providers`, `router.get_quota_status`,
+`router.get_usage_today`). Chat still goes through `/v1`; MCP is control-plane
+only, local, and read-only.
+
+```json
+{
+  "mcpServers": {
+    "9router": { "command": "9router-mcp" }
+  }
+}
+```
+
+`npm install -g 9router` puts the `9router-mcp` binary on your PATH. See
+[`docs/integrations/mcp.md`](docs/integrations/mcp.md) for the full tool
+reference, per-OS config paths, and security posture.
+
+---
+
 ## Video Guides
 
 <div align="center">

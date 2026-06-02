@@ -1,12 +1,12 @@
 ---
-title: "MCP Control-Plane Server (stdio + HTTP SSE, 6 tools)"
-description: "Expose 9Router introspection/control as MCP tools for Claude Desktop, Claude Code skills, and other MCP clients. Control-plane only (no chat tool). stdio + HTTP SSE transports. In-process Next.js runtime."
-status: pending
+title: "MCP Control-Plane Server (stdio, 3 read-only tools)"
+description: "Expose 9Router introspection as MCP tools for Claude Desktop and other stdio MCP clients. Control-plane only (no chat tool). stdio transport; McpServer runs in-process inside the CLI binary. v1 ships 3 read-only tools."
+status: completed
 priority: P2
 branch: "feature/dylan-improve"
 tags: ["mcp", "control-plane", "integration", "claude-desktop"]
 blockedBy: []
-blocks: ["260524-1312-prompt-cache-opt-in"]
+blocks: []  # prompt-cache plan shipped independently (commits c8e1ca5, e600d72); was never a real dependency
 created: "2026-05-24T06:11:47.654Z"
 createdBy: "ck:plan"
 source: skill
@@ -16,19 +16,21 @@ source: skill
 
 ## Overview
 
-9Router has no agent-native control surface today. Clients hit `/v1` for chat but cannot ask 9Router questions like "what providers are healthy?", "what's my quota?", or "switch to combo X" from inside an LLM conversation. This plan adds an MCP server exposing 6 control-plane tools, reusing existing repos/services. Two transports: stdio (Claude Desktop config) and HTTP SSE (web/remote clients), both backed by the same Next.js process.
+9Router has no agent-native control surface today. Clients hit `/v1` for chat but cannot ask 9Router questions like "what providers are healthy?" or "what's my quota?" from inside an LLM conversation. This plan adds an MCP server exposing 3 read-only control-plane tools, reusing existing repos. One transport: stdio (Claude Desktop). The CLI binary runs the `McpServer` in-process and opens its own SQLite handle — no HTTP proxy, no coupling to a running Next.js process.
 
-**Scope:** Control-plane only — NO chat tool. `/v1` remains the single chat surface to avoid duplication. MCP authentication and MCP resources/prompts are explicitly out of scope for v1.
+**Scope:** Control-plane introspection only — NO chat tool, NO state-mutating tools in v1. `/v1` remains the single chat surface. HTTP SSE transport, MCP authentication, MCP resources/prompts, and mutating tools (`switch_combo`, `mark_connection_needs_reauth`, `test_connection`) are deferred to v2.
 
 ## Phases
 
-| Phase | Name                                                                                                  | Status  |
-| ----- | ----------------------------------------------------------------------------------------------------- | ------- |
-| 1     | [Foundation (deps + Zod schemas + tests-first)](./phase-01-foundation-deps-zod-schemas-tests-first.md) — **see Red Team Adjustments: now covers Phase 0 toolchain bootstrap, 3 tools not 6, current SDK API** | Pending |
-| 2     | [Tool Implementations (6 control-plane tools)](./phase-02-tool-implementations-6-control-plane-tools.md) — **see Red Team Adjustments: reduced to 3 read-only tools** | Pending |
-| 3     | [HTTP SSE Transport (/api/mcp route)](./phase-03-http-sse-transport-api-mcp-route.md) — **DROPPED v1 per Red Team #4, #13**. Defer to v2. | Cancelled |
-| 4     | [stdio Binary (bin/mcp.js + health-check)](./phase-04-stdio-binary-bin-mcp-js-health-check.md) — **see Red Team Adjustments: relocate to cli/bin/, port discovery, fail-fast health** | Pending |
-| 5     | [Docs + Claude Desktop Integration + E2E](./phase-05-docs-claude-desktop-integration-e2e.md) — **see Red Team Adjustments: stdio-only docs, smaller surface** | Pending |
+| Phase | Name | Status |
+| ----- | ---- | ------ |
+| 1 | [Foundation: toolchain bootstrap + deps + 3 tool stubs + tests-first](./phase-01-foundation-deps-zod-schemas-tests-first.md) | Complete |
+| 2 | [Tool Implementations (3 read-only tools)](./phase-02-tool-implementations-6-control-plane-tools.md) | Complete |
+| 3 | [HTTP SSE Transport](./phase-03-http-sse-transport-api-mcp-route.md) — **CANCELLED v1**, deferred to v2 | Cancelled |
+| 4 | [stdio Binary (`cli/bin/9router-mcp.js`, in-process)](./phase-04-stdio-binary-bin-mcp-js-health-check.md) | Complete |
+| 5 | [Docs + Claude Desktop Integration + E2E](./phase-05-docs-claude-desktop-integration-e2e.md) | Complete |
+
+> Toolchain bootstrap (root `vitest`/`zod`/SDK deps, root `npm test` script) is folded into Phase 1 step 1 — no separate "Phase 0" file. Phase 3 is a tombstone retained for v2 design notes. Phase filenames are stable identifiers; content reflects final scope.
 
 ## Dependencies
 
@@ -43,27 +45,19 @@ No cross-plan blocking. Builds on existing repos in `src/lib/db/repos/` (connect
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Claude Desktop / Claude Code Skill / Custom MCP Client               │
-│        │                                                             │
-│        ├─ stdio: spawn `9router-mcp` binary                          │
-│        │       └─ binary proxies JSON-RPC to http://localhost:PORT   │
-│        │                                                             │
-│        └─ HTTP SSE: direct connect to http://localhost:PORT/api/mcp  │
-└──────────────────────────────────────────────────────────────────────┘
-                                │
-                                ↓
+│ Claude Desktop (stdio MCP client)                                     │
+│        │ spawns `9router-mcp` subprocess                              │
+└────────┼───────────────────────────────────────────────────────────────┘
+         ↓
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Next.js process — /api/mcp/route.js                                  │
-│   ├─ McpServer instance (singleton)                                  │
-│   ├─ Transport: SSEServerTransport (HTTP) / proxied stdio            │
-│   └─ Tool dispatcher                                                 │
-│        ├─ router.list_providers       → connectionsRepo              │
-│        ├─ router.get_quota_status     → usageRepo + connectionsRepo  │
-│        ├─ router.get_usage_today      → usageRepo                    │
-│        ├─ router.test_connection(id)  → auth.getProviderCredentials  │
-│        ├─ router.switch_combo(name)   → combosRepo + atomic swap     │
-│        └─ router.mark_connection_needs_reauth(id, reason)            │
-│                                       → reauth-state.markNeedsReauth │
+│ cli/bin/9router-mcp.js  (no HTTP, no running Next.js required)        │
+│   ├─ createMcpServer()                  (McpServer in-process)        │
+│   ├─ StdioServerTransport               (talks to Claude Desktop)     │
+│   ├─ opens own SQLite handle via shared src/lib/db/ (read-only use)   │
+│   └─ Tool dispatcher (3 read-only tools)                              │
+│        ├─ router.list_providers   → connectionsRepo.getProviderConnections + getEffectiveStatus
+│        ├─ router.get_quota_status → usageRepo.getUsageStats('today') + connectionsRepo
+│        └─ router.get_usage_today  → usageRepo.getUsageStats / getChartData('today')
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -72,8 +66,8 @@ No cross-plan blocking. Builds on existing repos in `src/lib/db/repos/` (connect
 | Decision                                  | Choice                                                          |
 | ----------------------------------------- | --------------------------------------------------------------- |
 | Tool scope                                | Control-plane only — NO chat tool (clients use `/v1` for chat)  |
-| Transports                                | Both: stdio (Claude Desktop) + HTTP SSE (web/remote)            |
-| Runtime                                   | Same Next.js process. stdio binary proxies over HTTP            |
+| Transports                                | stdio only (Claude Desktop). HTTP SSE deferred to v2            |
+| Runtime                                   | CLI binary runs McpServer in-process. MCP source closure bundled into `cli/app/` (updater pattern); sqlite + DATA_DIR resolved like `cli.js`; read-only DB use. `src/lib/mcp/*` uses relative imports only |
 | Authentication                            | NONE in v1 (matches local-trust posture of `/v1`)               |
 | MCP resources / prompts                   | Out of scope v1 — tools only                                    |
 | SDK                                       | `@modelcontextprotocol/sdk` (TypeScript/JavaScript, latest stable) |
@@ -90,6 +84,8 @@ Test file naming convention: `tests/unit/mcp-<feature>.test.js`.
 
 ## Out of scope (v1)
 
+- HTTP SSE transport (`/api/mcp` route) — namespace collides with existing `[plugin]` bridge; `SSEServerTransport` deprecated. v2 = Streamable HTTP under a `/api/mcp/control` namespace
+- State-mutating tools: `switch_combo` (no `setActive` in `combosRepo`), `mark_connection_needs_reauth` (LLM-hallucination risk), `test_connection` (`getProviderCredentials` has routing-layer side effects). v2 candidates
 - MCP authentication / API-key gating (deferred until remote MCP deployments emerge)
 - Chat tool surface (use `/v1` instead — avoids duplication and streaming complexity)
 - MCP resources surface (`resources/list`, `resources/read`)
@@ -100,21 +96,22 @@ Test file naming convention: `tests/unit/mcp-<feature>.test.js`.
 
 ## Success criteria (whole plan)
 
-- [ ] `@modelcontextprotocol/sdk` installed, version pinned in `package.json`
-- [ ] McpServer instance registers 6 tools at boot
-- [ ] HTTP SSE transport at `/api/mcp` returns valid `initialize` handshake
-- [ ] stdio binary `9router-mcp` launches, health-checks running Next.js, proxies JSON-RPC
-- [ ] Each of 6 tools has Zod input/output schema + happy-path Vitest coverage
-- [ ] In-process integration test (SDK Client + Server linked) lists 6 tools + calls each
-- [ ] Claude Desktop `mcp.json` config snippet works copy-paste (manual verification)
-- [ ] `docs/integrations/mcp.md` written with tool reference + setup guide
-- [ ] No regressions on existing `/v1` test suite
+- [ ] `@modelcontextprotocol/sdk` + `zod` + `vitest` added to ROOT `package.json`; SDK pinned to exact version
+- [ ] Root `npm test` works without the `/tmp/node_modules` bootstrap
+- [ ] `createMcpServer()` registers 3 read-only tools using the current SDK `registerTool(name, { description, inputSchema }, handler)` API
+- [ ] stdio binary `cli/bin/9router-mcp.js` launches, runs McpServer in-process, lists 3 tools
+- [ ] Each of 3 tools has Zod input/output schema + happy-path + edge-case Vitest coverage
+- [ ] In-process integration test (SDK Client + Server linked) lists 3 tools + calls each
+- [ ] Claude Desktop config snippet works copy-paste (manual verification)
+- [ ] `docs/integrations/mcp.md` written with 3-tool reference + stdio setup guide
+- [ ] No collision with existing `src/lib/mcp/stdioSseBridge.js` or `src/app/api/mcp/[plugin]/`
+- [ ] No regressions on existing `/v1` + reauth + warmup test suites
 
 ## Open questions
 
-- Should `switch_combo` require a `confirm: true` arg to avoid accidental LLM-hallucinated swaps? Default: NO direct apply. Revisit after first user feedback.
-- Should `mark_connection_needs_reauth` be exposed at all? It is a power-user / debug tool. Keep it for ops scenarios; document as advanced.
-- Tool naming convention `router.X` vs `nine_router.X` vs `9router.X` — MCP convention is snake_case but namespace dots are common. Default: `router.` namespace.
+- (Resolved) `switch_combo`, `mark_connection_needs_reauth`, `test_connection` — CUT from v1 (state-mutating / no safe read-only primitive). Re-add as a dedicated v2 plan once an "active combo" persistence model and a side-effect-free probe helper exist.
+- (Resolved) Tool naming locked to `router.*` dotted namespace + snake_case method (validation D-V2). Avoids leading-digit identifier validators.
+- (Open) Should v1 binary open the SQLite handle in explicit read-only mode, or open default read-write and rely on tools only calling read functions? Default chosen: latter (simpler; the 3 v1 tools are read-only). Revisit if a write tool lands.
 
 ## References
 
@@ -242,3 +239,31 @@ Test file naming convention: `tests/unit/mcp-<feature>.test.js`.
 - **Reconciled stale references:** 0 — all validation decisions already aligned with Red Team Adjustments
 - **Unresolved contradictions:** 0
 - **Status:** Plan ready for `/ck:cook`. All 15 red-team findings + 4 validation decisions applied. No outstanding open questions for v1 scope.
+
+## Pre-Cook Review — 2026-06-02
+
+Deep verification pass against live code before cook. Two issues the red-team missed; both fixed.
+
+**PC-1 (Critical) — Phase 4 in-process model broke the published artifact.** The red-team cancelled Phase 3's HTTP transport and pivoted the binary to "import root `src/lib/mcp/server.js` in-process". Verified against `cli/scripts/build-cli.js`: the published `9router` package ships `cli/app/` = a compiled Next.js **standalone** bundle; root `src/` is not included, and `better-sqlite3` is stripped (self-heals into `~/.9router/runtime/node_modules`, resolved via `NODE_PATH` by `cli.js`). So the in-process import works in the dev monorepo but throws `ERR_MODULE_NOT_FOUND` after `npm i -g 9router`.
+- **New data the red-team missed:** the build compiles app code into webpack chunks; loose `src/lib` is absent from the package; sqlite is runtime-resolved.
+- **User decision:** bundle the MCP source closure into `cli/app/` following the existing updater/MITM precedent (`build-cli.js` steps 7/7b). Bin replicates `cli.js` sqlite `NODE_PATH` + DATA_DIR resolution.
+- **Derived constraint:** `src/lib/mcp/*` must use **relative** imports (no `@/`) so the loose bundle resolves under plain `node`. Locked into Phase 1.
+- **Applied to:** Phase 4 (full rewrite), Phase 1 (import-style contract). Effort Phase 4 2-3h → 5-6h.
+
+**PC-2 (Medium) — wrong `isolated-db.mjs` usage in test snippets.** Verified `tests/helpers/isolated-db.mjs`: `setupIsolatedDb()` is SYNC, returns `{ dir, cleanup }`, sets `DATA_DIR` only — does NOT init the DB. Phase 2 + 5 snippets `await`-ed it and assumed init. Fixed: call sync FIRST, then dynamic-import `@/lib/db/index.js` + `await initDb()`, then import repos.
+- **Applied to:** Phase 2, Phase 5.
+
+**Verified-correct (no change):** WAL mode (`src/lib/db/schema.js:5`); repo function names (`getProviderConnections`, `getUsageStats`, `getChartData`, `getEffectiveStatus`); db layer uses relative imports; `combosRepo` has no `setActive`/`getActive`; `zod`/SDK absent from root `package.json`.
+
+**Still verify at phase start (cheap, in-phase):** installed SDK export paths (`registerTool`, `server/stdio.js`, linked-transport helper); `getUsageStats('today')` + `getProviderConnections` return shapes (to finalize Zod output schemas); `uuid` traced into the bundle node_modules.
+
+## Implementation Outcome — 2026-06-02
+
+Status: **COMPLETE**. All 4 active phases done; 15 MCP tests pass (foundation/tools/stdio-binary/e2e); reauth+warmup 28/28; bundled layout empirically verified from an isolated `/tmp` copy. SDK pinned `1.29.0`, zod `3.25.76`.
+
+Two issues surfaced at cook time that the pre-cook review missed (both fixed):
+
+- **CU-1 — db closure was NOT fully relative.** `paths.js` imported `@/lib/dataDir.js` on the hot path (`driver→paths→dataDir`), plus lazy `@/` in `pricingRepo.js`/`apiKeysRepo.js`. Under plain `node` the bundled closure could not resolve `@/`. Fix: relativized those 4 imports (behavior-preserving — same files; Next build + reauth/warmup verified). Chosen over a runtime alias hook (KISS, fixes both dev-tree test and bundle uniformly).
+- **CU-2 — `build-cli.js` Step 3 + SDK dep closure.** Workspace tracing mode nests standalone at `standalone/<project>/server.js`; Step 3 only probed root/`app/`. Added a nested-path fallback (user-approved). Also the SDK's deep prod-dep tree is never traced by Next → added `ensureModuleClosureInBundle()` walking prod deps (bundled 92 packages). Bin's SDK import moved into `src/lib/mcp/stdio-runner.js` (under `app/`) since the bin sits outside `app/` and can't resolve bundled `node_modules`. Bin layout probe order = dev-first (avoids stale `cli/app/src`).
+
+Deferred (noted, not blocking): MCP `outputSchema`/`structuredContent` registration (v1 returns internally-validated text-JSON, matching the locked phase-02 pattern) — v2 candidate.

@@ -28,7 +28,7 @@ export async function getApiKeyById(id) {
 export async function createApiKey(name, machineId) {
   if (!machineId) throw new Error("machineId is required");
   const db = await getAdapter();
-  const { generateApiKeyWithMachine } = await import("@/shared/utils/apiKey");
+  const { generateApiKeyWithMachine } = await import("../../../shared/utils/apiKey.js");
   const result = generateApiKeyWithMachine(machineId);
   const apiKey = {
     id: uuidv4(),

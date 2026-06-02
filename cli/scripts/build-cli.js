@@ -131,18 +131,33 @@ if (fs.existsSync(cliAppDir)) {
 console.log("✅ Cleaned\n");
 
 // Step 3: Copy Next.js standalone build to app/cli/app.
-// Newer Next.js standalone output writes server.js/package.json plus .next/, src/, and
-// node_modules/ directly under .next/standalone. Older builds may still use a nested app/.
+// Standalone output location depends on outputFileTracingRoot:
+//   - root mode    → server.js directly under .next/standalone/
+//   - older builds → nested under .next/standalone/app/
+//   - workspace mode (NEXT_TRACING_ROOT_MODE=workspace, used by this build)
+//     nests it under .next/standalone/<project-dir>/server.js so hoisted
+//     node_modules are traced. Probe all three.
 console.log("3️⃣  Copying Next.js standalone build to app/cli/app...");
 const standaloneRoot = path.join(appDir, ".next", "standalone");
 const standaloneRootResolved = path.join(buildDistDir, "standalone");
 const standaloneRootToUse = fs.existsSync(standaloneRootResolved) ? standaloneRootResolved : standaloneRoot;
-const standaloneApp = fs.existsSync(path.join(standaloneRootToUse, "server.js"))
-  ? standaloneRootToUse
-  : path.join(standaloneRootToUse, "app");
-if (!fs.existsSync(standaloneApp)) {
+function locateStandaloneApp(root) {
+  if (fs.existsSync(path.join(root, "server.js"))) return root;
+  if (fs.existsSync(path.join(root, "app", "server.js"))) return path.join(root, "app");
+  // workspace tracing mode: server.js sits one level deep under <project-dir>/
+  if (fs.existsSync(root)) {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory() && fs.existsSync(path.join(root, entry.name, "server.js"))) {
+        return path.join(root, entry.name);
+      }
+    }
+  }
+  return path.join(root, "app"); // not found → error path below
+}
+const standaloneApp = locateStandaloneApp(standaloneRootToUse);
+if (!fs.existsSync(path.join(standaloneApp, "server.js"))) {
   console.error("❌ Next.js standalone build not found under .next/standalone");
-  console.error("Expected either .next/standalone/server.js or .next/standalone/app/");
+  console.error("Expected .next/standalone/server.js, /app/server.js, or /<project>/server.js");
   process.exit(1);
 }
 copyRecursive(standaloneApp, cliAppDir);
@@ -242,6 +257,57 @@ if (fs.existsSync(updaterSrc)) {
 } else {
   console.log("⏭️  No updater files found\n");
 }
+
+// Step 7c: Copy MCP control-plane source closure (not bundled by Next.js —
+// the McpServer is run in-process by the 9router-mcp bin, not imported by the
+// app). Mirrors the updater/MITM precedent: loose relative-import files under
+// the bundle resolve under plain node. Closure = mcp + db layer + dataDir + the
+// 3 leaf shared utils the db repos reach for.
+console.log("7️⃣ c Copying MCP server source closure...");
+function copyFileInBundle(relPath) {
+  const src = path.join(appDir, relPath);
+  const dest = path.join(cliAppDir, relPath);
+  if (!fs.existsSync(src)) {
+    console.warn(`⚠️  MCP closure file missing: ${relPath}`);
+    return;
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+}
+copyRecursive(path.join(appDir, "src", "lib", "mcp"), path.join(cliAppDir, "src", "lib", "mcp"));
+copyRecursive(path.join(appDir, "src", "lib", "db"), path.join(cliAppDir, "src", "lib", "db"));
+copyFileInBundle(path.join("src", "lib", "dataDir.js"));
+copyFileInBundle(path.join("src", "shared", "utils", "get-effective-status.js"));
+copyFileInBundle(path.join("src", "shared", "constants", "pricing.js"));
+copyFileInBundle(path.join("src", "shared", "utils", "apiKey.js"));
+// Packages the closure needs that the app-traced node_modules may not include
+// (zod + the MCP SDK are MCP-only; uuid is used by connectionsRepo). The SDK
+// has a deep prod-dependency tree the Next trace never sees, so walk and bundle
+// the full production closure of each, not just the top-level package dir.
+function ensureModuleClosureInBundle(pkg, seen) {
+  if (seen.has(pkg)) return;
+  seen.add(pkg);
+  ensureModuleInBundle(pkg);
+  const srcPkg = [
+    path.join(appDir, "node_modules", pkg),
+    path.join(rootDir, "node_modules", pkg),
+  ].find((p) => fs.existsSync(path.join(p, "package.json")));
+  if (!srcPkg) return;
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(srcPkg, "package.json"), "utf8"));
+  } catch {
+    return;
+  }
+  for (const dep of Object.keys(manifest.dependencies || {})) {
+    ensureModuleClosureInBundle(dep, seen);
+  }
+}
+const bundledClosure = new Set();
+for (const pkg of ["uuid", "zod", "@modelcontextprotocol/sdk"]) {
+  ensureModuleClosureInBundle(pkg, bundledClosure);
+}
+console.log(`✅ Copied MCP server closure (${bundledClosure.size} packages)\n`);
 
 // Step 8: Build MITM server (config driven - see app/cli/scripts/buildMitm.js)
 console.log("8️⃣  Building MITM server...");

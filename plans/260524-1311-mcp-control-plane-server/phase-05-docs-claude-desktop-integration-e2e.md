@@ -1,68 +1,62 @@
 ---
 phase: 5
 title: "Docs + Claude Desktop Integration + E2E"
-status: pending
+status: completed
 priority: P2
-effort: "3-4h"
-dependencies: [1, 2, 3, 4]
+effort: "2-3h"
+dependencies: [1, 2, 4]
 ---
 
 # Phase 5: Docs + Claude Desktop Integration + E2E
 
 ## Overview
 
-End-to-end test that walks: spawn real HTTP server → MCP client connects → lists 6 tools → calls each. Plus user-facing documentation for Claude Desktop, Claude Code skill authors, and arbitrary MCP clients. Updates CHANGELOG, README, architecture docs.
+One in-process E2E test that links `createMcpServer()` to an SDK `Client`, lists the 3 tools, and calls each. Plus stdio-only user docs for Claude Desktop. Updates CHANGELOG + README + `docs/integrations/mcp.md`.
 
 ## Requirements
 
 ### Functional
 - One E2E Vitest test that:
-  1. Starts the Next.js server in test-process via in-memory route handler (or spawns a real port)
-  2. Connects an SDK Client via SSEClientTransport
-  3. Asserts handshake succeeds, lists 6 tools
-  4. Calls each tool with a valid input and asserts non-error response
+  1. Sets up an isolated temp `DATA_DIR` + seeds one healthy connection (via `tests/helpers/isolated-db.mjs`)
+  2. `createMcpServer()` → links to an SDK `Client` via the SDK's linked-transport helper (verify exact import path against installed SDK `dist/`)
+  3. Asserts handshake succeeds + lists exactly 3 tools
+  4. Calls each tool with valid input, asserts non-error response
 - `docs/integrations/mcp.md` covers:
-  - What MCP is (1-paragraph)
-  - 6 tool reference (name, description, input schema, output schema, example call/response)
-  - Claude Desktop setup (`mcp.json` copy-paste snippet)
-  - Claude Code skill setup
-  - Generic HTTP SSE client setup (curl example)
-  - Security posture (localhost-only, no auth in v1, switch_combo risk)
-- `README.md` adds short "MCP control-plane" section linking to docs
-- `docs/system-architecture.md` adds one paragraph describing MCP surface
-- `CHANGELOG.md` entry under upcoming version
+  - What MCP is + why 9Router exposes it (1 paragraph)
+  - 3-tool reference (name, description, input schema, output schema, example call/response)
+  - Claude Desktop setup (config snippet, per-OS config path)
+  - Security posture (stdio-only, local-trust, read-only tools)
+- `README.md` adds a short "MCP control-plane" section linking to the docs
+- `CHANGELOG.md` entry under the upcoming version
 
 ### Non-functional
-- Docs use kebab-case file naming (`mcp.md`, follows existing `docs/integrations/` if present, else creates the folder)
-- E2E test isolated (temp DATA_DIR, no shared state)
+- Docs use kebab-case naming (`docs/integrations/mcp.md`; create the folder if absent).
+- E2E test isolated — temp `DATA_DIR`, no shared state.
 
 ## Architecture
 
 ```
 tests/unit/mcp-e2e.test.js
-  ├── setup: temp DATA_DIR + seed minimal connections
-  ├── start: real http.createServer wrapping Next.js mcp routes (or use linked InMemoryTransport)
-  ├── client: new Client + SSEClientTransport
-  ├── assertions:
-  │     - initialize handshake ok
-  │     - listTools → 6 tools, schemas valid
-  │     - call each tool → response shape matches outputSchema
+  ├── setup: isolated temp DATA_DIR + seed one healthy connection
+  ├── createMcpServer() ── linked transport ── SDK Client
+  ├── assertions: handshake ok · listTools → 3 · callTool each → non-error
   └── teardown
 ```
 
-Realistic choice: this phase uses the SDK's `InMemoryTransport.createLinkedPair()` (already covered in Phase 3) AS WELL AS a real HTTP-port test that boots `http.createServer` and mounts the route handlers manually. Both run for completeness.
+Single transport path: SDK linked in-memory pair (stdio is exercised by the Phase 4 child-process test). No HTTP, no `SSEClientTransport`.
 
 ## Related Code Files
 
 - Create: `tests/unit/mcp-e2e.test.js`
 - Create: `docs/integrations/mcp.md`
 - Modify: `CHANGELOG.md`
-- Modify: `README.md` (short section + link to docs)
-- Modify: `docs/system-architecture.md` (add MCP paragraph)
-- Modify: `docs/project-changelog.md` (per repo convention)
+- Modify: `README.md` (short section + link)
 
 Read for context:
-- All Phase 1-4 files
+- All Phase 1, 2, 4 files
+- `tests/helpers/isolated-db.mjs`
+
+> `docs/system-architecture.md` and `docs/project-changelog.md` updates are NOT in this phase — defer the architecture doc to a post-merge docs-sync task; the changelog is handled by `/ck:journal` at session end. Keeps Phase 5 to 3 docs touched.
 
 ## TDD — failing test first
 
@@ -70,177 +64,34 @@ Read for context:
 // tests/unit/mcp-e2e.test.js
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+// Linked-transport helper: verify path with `cat node_modules/@modelcontextprotocol/sdk/dist/index.d.ts`
 
-let tempDir, server, client;
-
+let client, cleanup;
 beforeAll(async () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-mcp-e2e-"));
-  process.env.DATA_DIR = tempDir;
+  const { setupIsolatedDb } = await import("../helpers/isolated-db.mjs");
+  ({ cleanup } = setupIsolatedDb());             // SYNC: sets DATA_DIR, returns { dir, cleanup }
   const db = await import("@/lib/db/index.js");
-  await db.initDb();
+  await db.initDb();                             // init AFTER DATA_DIR is set
   const repo = await import("@/lib/db/repos/connectionsRepo.js");
   await repo.createProviderConnection({ provider: "claude", authType: "oauth", email: "seed@x" });
 
   const { createMcpServer } = await import("@/lib/mcp/server.js");
-  server = createMcpServer();
-  const [c, s] = InMemoryTransport.createLinkedPair();
-  await server.connect(s);
+  const server = createMcpServer();
+  // const [c, s] = <SDK linked pair>; await server.connect(s);
   client = new Client({ name: "e2e", version: "0.0.0" });
-  await client.connect(c);
+  // await client.connect(c);
 });
+afterAll(() => cleanup?.());
 
-afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
-
-describe("mcp e2e", () => {
-  it("handshakes, lists 6 tools, calls each", async () => {
-    const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(6);
-
-    const callList = await client.callTool({ name: "router.list_providers", arguments: {} });
-    expect(callList.isError).toBeFalsy();
-
-    // ... call remaining 5 with valid args (test_connection needs valid id)
-  });
-});
-```
-
-## Implementation Steps
-
-1. **Test-first:** write `tests/unit/mcp-e2e.test.js`. Run → red.
-2. Implement the test loop to walk all 6 tools. Verify against Phase 2 implementations.
-3. Run → green.
-4. Write `docs/integrations/mcp.md`:
-   - 1-paragraph "What is MCP, why 9Router exposes it"
-   - Tool reference table with name + description + example call
-   - Per-tool detailed section with input schema, output schema, response example
-   - Claude Desktop section: where `mcp.json` lives (per OS), copy-paste snippet:
-     ```json
-     {
-       "mcpServers": {
-         "9router": {
-           "command": "9router-mcp",
-           "env": { "NINEROUTER_URL": "http://localhost:20128" }
-         }
-       }
-     }
-     ```
-   - Claude Code skill section: SDK call example
-   - Generic HTTP SSE section: curl example
-   - **Security posture**: localhost-only, no auth, switch_combo + mark_needs_reauth are mutation tools; if HOSTNAME=0.0.0.0, any LAN device can use them
-5. Update `README.md`: short "MCP Control-Plane" section after Quick Start, linking to `docs/integrations/mcp.md`.
-6. Update `docs/system-architecture.md` with one paragraph + the architecture block from `plan.md`.
-7. Update `CHANGELOG.md`:
-   ```
-   ### Added
-   - MCP control-plane server: expose 6 introspection/control tools
-     (router.list_providers, .get_quota_status, .get_usage_today,
-     .test_connection, .switch_combo, .mark_connection_needs_reauth)
-     via stdio + HTTP SSE transports. Backed by the running Next.js
-     process. See docs/integrations/mcp.md for Claude Desktop setup.
-     New binary: `9router-mcp` (installed via npm bin).
-     Localhost-only; no authentication in v1.
-   ```
-8. Update `docs/project-changelog.md` per repo doc rules.
-9. Run full vitest suite — verify no regressions.
-
-## Success Criteria
-
-- [ ] `mcp-e2e.test.js` passes — handshake + listTools(6) + 6 callTool round-trips
-- [ ] `docs/integrations/mcp.md` covers all 6 tools + Claude Desktop config + security
-- [ ] `README.md` links to mcp.md
-- [ ] `docs/system-architecture.md` mentions MCP surface
-- [ ] `CHANGELOG.md` + `docs/project-changelog.md` entries present
-- [ ] Manual test: Claude Desktop config snippet works — list tools from chat
-- [ ] `npm run build` clean
-- [ ] No regressions in any prior test suite
-
-## Risk Assessment
-
-| Risk | Mitigation |
-|------|------------|
-| Claude Desktop config format changes across versions | Test against Claude Desktop release matrix; document tested version range |
-| E2E test slow if real HTTP port used | Prefer InMemoryTransport for CI; manual HTTP smoke for release verification |
-| Docs drift later when tool schemas evolve | docs/integrations/mcp.md links to `src/lib/mcp/schemas.js` as source of truth |
-| User confuses MCP `/v1` with chat `/v1` | docs clearly state: MCP for control, `/v1` for chat |
-
-## Security Considerations
-
-- Docs explicitly call out: ANY MCP client with reach to the bind interface can mutate state. Security posture matches `/v1`.
-- Suggest `HOSTNAME=127.0.0.1` as the safe default in docs
-- Note that adding auth is a future plan if remote MCP becomes a use case
-
-## Next Steps
-
-Plan complete. After merge:
-- Monitor user feedback on tool coverage — likely candidates for v2: `list_combos`, `get_provider_health_history`, `disable_connection`
-- If demand for remote MCP emerges → spin off new plan for MCP auth (API-key or signed token)
-- If chat-tool requests common → reconsider exposing `router.send_chat` (currently rejected per architectural separation)
-
-## Red Team Adjustments — 2026-05-24
-
-Findings **#1, #13** (downstream) ACCEPTED. Body scope SHRUNK to match Phase 3 cancellation + tool reduction.
-
-### v1 docs cover ONLY:
-
-- 3 read-only tools (`list_providers`, `get_quota_status`, `get_usage_today`) — NOT 6
-- stdio transport ONLY — drop "HTTP SSE" section, drop "generic web client" section
-- Claude Desktop config snippet using `cli/bin/9router-mcp.js` path:
-  ```json
-  {
-    "mcpServers": {
-      "9router": {
-        "command": "9router-mcp"
-      }
-    }
-  }
-  ```
-  Document `npm install -g 9router` makes `9router-mcp` resolvable (since published from `cli/`).
-
-### E2E test (corrected)
-
-Drop the InMemoryTransport-based test for Phase 3 (cancelled). Replace with in-process test linking `createMcpServer()` directly to a `Client` via the SDK's linked-transport pattern (verify correct import path from installed SDK version, finding #5).
-
-```js
-// tests/unit/mcp-e2e.test.js
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-
-// Use SDK's linked-transport helper (path TBD per current SDK).
-// Verify with: cat node_modules/@modelcontextprotocol/sdk/dist/index.d.ts
-
-let tempDir, client, server;
-beforeAll(async () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-mcp-e2e-"));
-  process.env.DATA_DIR = tempDir;
-  // seed via existing isolated-db helper
-  const { setupIsolatedDb } = await import("../helpers/isolated-db.mjs");
-  await setupIsolatedDb();
-  // ... seed one healthy connection
-  const { createMcpServer } = await import("@/lib/mcp/server.js");
-  server = createMcpServer();
-  // Link via SDK helper. Path verified pre-implementation.
-  // ... connect client
-});
-
-afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
-
-describe("mcp e2e (stdio in-process)", () => {
+describe("mcp e2e (in-process)", () => {
   it("handshake + lists 3 tools + calls each successfully", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(3);
     expect(tools.tools.map((t) => t.name).sort()).toEqual([
       "router.get_quota_status",
       "router.get_usage_today",
       "router.list_providers",
     ]);
-
     for (const t of tools.tools) {
       const res = await client.callTool({ name: t.name, arguments: {} });
       expect(res.isError).toBeFalsy();
@@ -249,14 +100,68 @@ describe("mcp e2e (stdio in-process)", () => {
 });
 ```
 
-### Docs file scope cut
+## Implementation Steps
 
-CHANGELOG, README, `docs/integrations/mcp.md` — keep. DROP:
-- `docs/system-architecture.md` update (defer to a docs-sync task post-merge per Scope Critic #10)
-- `docs/project-changelog.md` update (handled by ck:journal at session end)
+1. **Test-first:** write `tests/unit/mcp-e2e.test.js`. Run → red.
+2. Verify the SDK linked-transport import path against the installed `dist/`; wire client+server.
+3. Run → green.
+4. Write `docs/integrations/mcp.md`:
+   - 1-paragraph "what is MCP, why 9Router exposes it"
+   - 3-tool reference table + per-tool input/output schema + response example
+   - Claude Desktop section + config path per OS + snippet:
+     ```json
+     {
+       "mcpServers": {
+         "9router": { "command": "9router-mcp" }
+       }
+     }
+     ```
+     Note: `npm install -g 9router` makes `9router-mcp` resolvable (published from `cli/`).
+   - Security posture: stdio-only, runs locally as the user, 3 read-only tools — no state mutation in v1.
+5. Update `README.md`: short "MCP Control-Plane" section after Quick Start, link to `docs/integrations/mcp.md`.
+6. Update `CHANGELOG.md`:
+   ```
+   ### Added
+   - MCP control-plane server: 3 read-only introspection tools
+     (router.list_providers, router.get_quota_status, router.get_usage_today)
+     over stdio for Claude Desktop. McpServer runs in-process in the
+     `9router-mcp` CLI binary (published from cli/). Local, read-only,
+     no authentication in v1. See docs/integrations/mcp.md.
+   ```
+7. Run full Vitest suite → verify no regressions.
 
-Reduces Phase 5 from 5 docs touched to 3.
+## Success Criteria
 
-### Effort revised
+- [ ] `tests/unit/mcp-e2e.test.js` passes — handshake + listTools(3) + 3 callTool round-trips
+- [ ] `docs/integrations/mcp.md` covers all 3 tools + Claude Desktop config + security posture
+- [ ] `README.md` links to `docs/integrations/mcp.md`
+- [ ] `CHANGELOG.md` entry present
+- [ ] Manual: Claude Desktop config snippet works — list tools from chat
+- [ ] `npm run build` clean
+- [ ] No regressions in any prior test suite
 
-Was 3-4h. **Now 2-3h** (single transport, 3 tools, narrower docs).
+## Risk Assessment
+
+| Risk | Mitigation |
+|------|------------|
+| SDK linked-transport import path drift | Verify against installed `dist/index.d.ts` before writing the test |
+| Claude Desktop config format changes across versions | Document the tested Claude Desktop version range in the docs |
+| Docs drift as schemas evolve | `docs/integrations/mcp.md` cites `src/lib/mcp/server.js` Zod schemas as source of truth |
+| User confuses MCP with chat `/v1` | Docs state plainly: MCP = control/introspection, `/v1` = chat |
+
+## Security Considerations
+
+- Docs call out: the binary runs locally as the user; all 3 tools are read-only — no mutation surface in v1.
+- `list_providers` enumerates accounts (provider/email/status) but never exposes tokens.
+- Adding auth / remote transport is a separate v2 plan (see Phase 3 v2 notes + `plan.md` out-of-scope).
+
+## Next Steps
+
+After merge:
+- Watch user feedback for v2 tool candidates: `list_combos`, `get_provider_health_history`.
+- If remote MCP demand emerges → new plan: Streamable HTTP transport (`/api/mcp/control`) + MCP auth (Phase 3 v2 notes).
+- Mutating tools (`switch_combo`, `mark_connection_needs_reauth`, `test_connection`) → v2 plan once safe primitives exist.
+
+## Decision history
+
+Final stdio-only / 3-tool / 3-docs scope incorporates the 2026-05-24 red-team + validation outcomes: HTTP SSE E2E dropped (Phase 3 cancelled), tool count 3, docs trimmed (architecture doc + project-changelog deferred), Claude Desktop snippet uses the `cli/`-published `9router-mcp` bin with no env vars. Full audit trail: `plan.md` → `## Red Team Review` and `## Validation Log`.

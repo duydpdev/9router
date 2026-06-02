@@ -1,17 +1,36 @@
 ---
 phase: 3
-title: "HTTP SSE Transport (/api/mcp route)"
-status: pending
+title: "HTTP SSE Transport (CANCELLED v1 — v2 design notes)"
+status: cancelled
 priority: P2
-effort: "3-4h"
+effort: "0h (v1) / 3-4h (v2)"
 dependencies: [1, 2]
 ---
 
-# Phase 3: HTTP SSE Transport
+# Phase 3: HTTP SSE Transport — CANCELLED for v1
 
-## Overview
+> **STATUS: CANCELLED for v1.** No files are created in this phase. v1 ships stdio-only with the McpServer running in-process inside the CLI binary (see Phase 4). The rest of this file is retained as a **v2 design note** — read it only when adding a web/remote MCP consumer. It is NOT part of the v1 implementation.
 
-Mount the MCP server at `/api/mcp` using `SSEServerTransport` from the SDK. Browser/web clients and the stdio binary (Phase 4) connect here. Single shared `McpServer` instance per Next.js process. Localhost-only bind (matches `/v1`). NO authentication v1.
+## Why cancelled (v1)
+
+1. **Namespace collision** — `src/app/api/mcp/[plugin]/{sse,message}/route.js` already exists (outgoing MCP-plugin bridge). Adding `src/app/api/mcp/route.js` next to a dynamic `[plugin]` segment risks Next.js App Router precedence ambiguity. A v2 HTTP transport must mount under `/api/mcp/control` instead.
+2. **No consumer** — v1 client is Claude Desktop (stdio-only). Two transports double the surface for zero day-1 web users.
+3. **GC + singleton bugs** — reliable SSE session GC + module-scope singleton hot-reload leak in Next.js is real work, wasted with no consumer.
+4. **Deprecated API** — `SSEServerTransport` is deprecated in the current SDK; v2 must use Streamable HTTP, a different design.
+
+## v2 path (when a web consumer emerges)
+
+1. Adopt Streamable HTTP (current SDK default), not deprecated SSE.
+2. Mount under `/api/mcp/control` (avoids `[plugin]` collision).
+3. Use the `globalThis[Symbol.for("9router.mcpServer")]` singleton pattern (precedent: `src/lib/mcp/stdioSseBridge.js:14`).
+4. Use `request.signal.addEventListener("abort", cleanup)` + a TTL sweep for session GC (the `cancel()` callback is unreliable in Next.js — see `src/app/api/translator/console-logs/stream/route.js`).
+5. Pair with an MCP-auth plan (remote consumers = remote attack surface).
+
+---
+
+## Original v1 design (SUPERSEDED — retained for v2 reference only)
+
+Mount the MCP server at `/api/mcp` using `SSEServerTransport` from the SDK. Browser/web clients and the stdio binary connect here. Single shared `McpServer` instance per Next.js process. Localhost-only bind (matches `/v1`). NO authentication v1.
 
 ## Requirements
 

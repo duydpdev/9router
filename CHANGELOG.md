@@ -1,6 +1,12 @@
 # Unreleased
 
 ## Features
+- MCP control-plane server: 3 read-only introspection tools
+  (`router.list_providers`, `router.get_quota_status`, `router.get_usage_today`)
+  over stdio for Claude Desktop. The `McpServer` runs in-process inside the
+  `9router-mcp` CLI binary (published from `cli/`), opening 9Router's own SQLite
+  handle — no HTTP, no running server required. Local, read-only, no auth in v1.
+  See `docs/integrations/mcp.md`.
 - Opt-in embeddings cache via `x-router-cache: ttl=<seconds>` header.
   In-memory LRU, default 500MB budget (`PROMPT_CACHE_MAX_BYTES` override).
   Strict key (model + input + encoding_format + dimensions). Automatic bypass

@@ -35,7 +35,7 @@ Design source: `plans/reports/brainstorm-2026-06-01-bot-protection.md` (Approach
 | 5 | [Crawler Control](./phase-05-crawler-control.md) | ✅ Complete |
 | 6 | [Nginx & Fail2ban](./phase-06-nginx-fail2ban.md) | ✅ Complete |
 
-> **Implemented 2026-06-01.** 61 unit tests green (9 files). Code review: 6/7 criteria pass + C1 (unguarded botGuard → fail-all-on-DB-error) fixed by fail-open try/catch. Run tests: `bash tests/run-security-tests.sh unit/security-*.test.js`.
+> **Implemented 2026-06-01.** 45 unit tests green (8 files). Code review: 6/7 criteria pass + C1 (unguarded botGuard → fail-all-on-DB-error) fixed by fail-open try/catch. Run tests: `cd tests && npm test -- unit/security-*.test.js`.
 
 ## Key Decisions (from brainstorm)
 
