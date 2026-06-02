@@ -34,14 +34,14 @@ export async function createNodeSqliteAdapter(filePath) {
 
   // Periodic WAL checkpoint to keep -wal/-shm small
   const checkpointTimer = setInterval(() => {
-    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
+    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* best-effort periodic checkpoint */ }
   }, CHECKPOINT_INTERVAL_MS);
   if (typeof checkpointTimer.unref === "function") checkpointTimer.unref();
 
   function gracefulClose() {
-    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
-    try { stmtCache.clear(); } catch {}
-    try { db.close(); } catch {}
+    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* best-effort: shutting down */ }
+    try { stmtCache.clear(); } catch { /* best-effort teardown */ }
+    try { db.close(); } catch { /* best-effort teardown */ }
   }
   const onShutdown = () => gracefulClose();
   process.once("beforeExit", onShutdown);
@@ -70,11 +70,11 @@ export async function createNodeSqliteAdapter(filePath) {
         db.exec(`RELEASE ${sp}`);
         return r;
       } catch (e) {
-        try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch {}
+        try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch { /* savepoint cleanup; original error rethrown below */ }
         throw e;
       }
     },
-    checkpoint() { try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {} },
+    checkpoint() { try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* best-effort checkpoint */ } },
     close() {
       clearInterval(checkpointTimer);
       gracefulClose();

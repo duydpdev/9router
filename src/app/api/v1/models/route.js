@@ -9,6 +9,7 @@ import { getProviderConnections, getCombos, getCustomModels, getModelAliases } f
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
+import * as log from "@/sse/utils/logger.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -157,35 +158,35 @@ export async function buildModelsList(kindFilter) {
     connections = await getProviderConnections();
     connections = connections.filter(c => c.isActive !== false);
   } catch (e) {
-    console.log("Could not fetch providers, returning all models");
+    log.debug("ModelsAPI", "Could not fetch providers, returning all models", e?.message);
   }
 
   let combos = [];
   try {
     combos = await getCombos();
   } catch (e) {
-    console.log("Could not fetch combos");
+    log.debug("ModelsAPI", "Could not fetch combos", e?.message);
   }
 
   let customModels = [];
   try {
     customModels = await getCustomModels();
   } catch (e) {
-    console.log("Could not fetch custom models");
+    log.debug("ModelsAPI", "Could not fetch custom models", e?.message);
   }
 
   let modelAliases = {};
   try {
     modelAliases = await getModelAliases();
   } catch (e) {
-    console.log("Could not fetch model aliases");
+    log.debug("ModelsAPI", "Could not fetch model aliases", e?.message);
   }
 
   let disabledByAlias = {};
   try {
     disabledByAlias = await getDisabledModels();
   } catch (e) {
-    console.log("Could not fetch disabled models");
+    log.debug("ModelsAPI", "Could not fetch disabled models", e?.message);
   }
   const isDisabled = (alias, modelId) => Array.isArray(disabledByAlias[alias]) && disabledByAlias[alias].includes(modelId);
 
@@ -294,7 +295,7 @@ export async function buildModelsList(kindFilter) {
             rawModelIds = live.models.map((m) => m.id);
           }
         } catch (err) {
-          console.log(`Live model fetch failed for ${providerId}: ${err?.message || err}`);
+          log.warn("ModelsAPI", `Live model fetch failed for ${providerId}: ${err?.message || err}`);
         }
       }
 
@@ -437,7 +438,7 @@ export async function GET() {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
   } catch (error) {
-    console.log("Error fetching models:", error);
+    log.error("ModelsAPI", "Error fetching models:", error?.message || error);
     return Response.json(
       { error: { message: error.message, type: "server_error" } },
       { status: 500 }

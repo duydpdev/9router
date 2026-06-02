@@ -5,6 +5,7 @@ import { existsSync } from "fs";
 
 import { startWarmupScheduler } from "@/lib/warmup/scheduler";
 import { initKeyBudgetMonitor } from "@/lib/security/keyBudget";
+import * as log from "@/sse/utils/logger.js";
 
 import {
   enableTunnel,
@@ -87,18 +88,18 @@ export async function initializeApp() {
     // Auto-resume tunnel (once per process)
     if (settings.tunnelEnabled && !g.tunnelAutoResumed) {
       g.tunnelAutoResumed = true;
-      console.log("[InitApp] Tunnel was enabled, auto-resuming...");
+      log.info("InitApp", "Tunnel was enabled, auto-resuming...");
       safeRestartTunnel("startup").catch((e) =>
-        console.log("[InitApp] Tunnel resume failed:", e.message),
+        log.error("InitApp", "Tunnel resume failed:", e.message),
       );
     }
 
     // Auto-resume tailscale (once per process)
     if (settings.tailscaleEnabled && !g.tailscaleAutoResumed) {
       g.tailscaleAutoResumed = true;
-      console.log("[InitApp] Tailscale was enabled, auto-resuming...");
+      log.info("InitApp", "Tailscale was enabled, auto-resuming...");
       safeRestartTailscale("startup").catch((e) =>
-        console.log("[InitApp] Tailscale resume failed:", e.message),
+        log.error("InitApp", "Tailscale resume failed:", e.message),
       );
     }
 
@@ -124,10 +125,10 @@ export async function initializeApp() {
       g.signalHandlersRegistered = true;
     }
 
-    ensureCloudflared().catch(() => {});
+    ensureCloudflared().catch((e) => log.debug("InitApp", "ensureCloudflared failed (watchdog will retry):", e?.message));
 
     // Sync mitmAlias DB → JSON cache so standalone MITM server can read it
-    syncMitmAliasCache().catch(() => {});
+    syncMitmAliasCache().catch((e) => log.debug("InitApp", "mitmAlias cache sync failed:", e?.message));
 
     // Auto-respawn tunnel when cloudflared exits unexpectedly (e.g. network change drop)
     setTunnelUnexpectedExitCallback(() => {
@@ -146,7 +147,7 @@ export async function initializeApp() {
     // Auto-start MITM if it was enabled before restart
     autoStartMitm();
   } catch (error) {
-    console.error("[InitApp] Error:", error);
+    log.error("InitApp", "Error:", error?.message || error);
   }
 }
 
@@ -161,8 +162,9 @@ async function autoStartMitm() {
 
     const password = await loadEncryptedPassword();
     if (!password && process.platform !== "win32") {
-      console.log(
-        "[InitApp] MITM was enabled but no saved password found, skipping auto-start",
+      log.info(
+        "InitApp",
+        "MITM was enabled but no saved password found, skipping auto-start",
       );
       return;
     }
@@ -170,17 +172,17 @@ async function autoStartMitm() {
     const keys = await getApiKeys();
     const activeKey = keys.find((k) => k.isActive !== false);
 
-    console.log("[InitApp] MITM was enabled, auto-starting...");
+    log.info("InitApp", "MITM was enabled, auto-starting...");
     await startMitm(activeKey?.key || "sk_9router", password);
-    console.log("[InitApp] MITM auto-started");
+    log.info("InitApp", "MITM auto-started");
     try {
       await restoreToolDNS(password);
-      console.log("[InitApp] DNS restored from saved state");
+      log.info("InitApp", "DNS restored from saved state");
     } catch (e) {
-      console.log("[InitApp] DNS restore failed:", e.message);
+      log.warn("InitApp", "DNS restore failed:", e.message);
     }
   } catch (err) {
-    console.log("[InitApp] MITM auto-start failed:", err.message);
+    log.error("InitApp", "MITM auto-start failed:", err.message);
   } finally {
     g.mitmStartInProgress = false;
   }
@@ -223,21 +225,22 @@ async function safeRestartTunnel(reason) {
   }
 
   if (!force && Date.now() - svc.lastRestartAt < RESTART_COOLDOWN_MS) {
-    console.log(`[Tunnel] degraded but cooldown active, skip (${reason})`);
+    log.debug("Tunnel", `degraded but cooldown active, skip (${reason})`);
     return;
   }
   if (!(await checkInternet())) return;
 
-  console.log(
-    `[Tunnel] safeRestart (${reason}) — tunnel unreachable${force ? " [force]" : ""}`,
+  log.info(
+    "Tunnel",
+    `safeRestart (${reason}) — tunnel unreachable${force ? " [force]" : ""}`,
   );
   try {
     await enableTunnel();
     svc.lastRestartAt = Date.now();
-    console.log("[Tunnel] restart success");
+    log.info("Tunnel", "restart success");
   } catch (err) {
     if (!/cloudflared killed|tunnel cancelled/.test(err.message)) {
-      console.log("[Tunnel] restart failed:", err.message);
+      log.error("Tunnel", "restart failed:", err.message);
     }
   }
 }
@@ -257,20 +260,21 @@ async function safeRestartTailscale(reason) {
 
   const force = FORCE_RESTART_REASONS.test(reason);
   if (!force && Date.now() - svc.lastRestartAt < RESTART_COOLDOWN_MS) {
-    console.log(`[Tailscale] degraded but cooldown active, skip (${reason})`);
+    log.debug("Tailscale", `degraded but cooldown active, skip (${reason})`);
     return;
   }
   if (!(await checkInternet())) return;
 
-  console.log(
-    `[Tailscale] safeRestart (${reason}) — daemon not running${force ? " [force]" : ""}`,
+  log.info(
+    "Tailscale",
+    `safeRestart (${reason}) — daemon not running${force ? " [force]" : ""}`,
   );
   try {
     await enableTailscale();
     svc.lastRestartAt = Date.now();
-    console.log("[Tailscale] restart success");
+    log.info("Tailscale", "restart success");
   } catch (err) {
-    console.log("[Tailscale] restart failed:", err.message);
+    log.error("Tailscale", "restart failed:", err.message);
   }
 }
 
@@ -342,7 +346,7 @@ function startNetworkMonitor() {
       safeRestartTunnel(reason).catch(() => {});
       safeRestartTailscale(reason).catch(() => {});
     } catch (err) {
-      console.log("[NetworkMonitor] error:", err.message);
+      log.error("NetworkMonitor", "error:", err.message);
     }
   }, NETWORK_CHECK_INTERVAL_MS);
 

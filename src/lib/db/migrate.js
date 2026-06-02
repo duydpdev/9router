@@ -153,7 +153,7 @@ function syncSchemaFromTables(adapter) {
 
     // Indexes (idempotent)
     for (const idx of def.indexes || []) {
-      try { adapter.exec(idx); } catch {}
+      try { adapter.exec(idx); } catch { /* idempotent: index already exists */ }
     }
   }
 }
@@ -310,7 +310,7 @@ export async function runMigrationOnce(adapter) {
       throw err;
     }
 
-    try { fs.writeFileSync(MIGRATED_MARKER, new Date().toISOString()); } catch {}
+    try { fs.writeFileSync(MIGRATED_MARKER, new Date().toISOString()); } catch { /* best-effort marker write */ }
     pruneOldBackups();
     console.log(`[DB][migrate] JSON → SQLite in ${Date.now() - t0}ms | legacy JSON kept at DATA_DIR | backup: ${backupDir}`);
     return;
@@ -326,14 +326,14 @@ export async function runMigrationOnce(adapter) {
   const newVer = getAppVersion();
   if (oldVer && oldVer !== newVer) {
     const backupDir = makeBackupDir(`upgrade-${oldVer}-to-${newVer}`);
-    try { backupFile(DATA_FILE, backupDir); } catch {}
+    try { backupFile(DATA_FILE, backupDir); } catch (e) { console.warn(`[DB][migrate] pre-migration backup failed (proceeding): ${e?.message || e}`); }
     setMetaSync(adapter, "appVersion", newVer);
     pruneOldBackups();
     console.log(`[DB][migrate] App ${oldVer} → ${newVer} | schema ${migInfo.from} → ${migInfo.to} | backup: ${backupDir}`);
   } else if (migInfo.applied > 0) {
     // Schema upgrade without app version bump — still backup
     const backupDir = makeBackupDir(`schema-${migInfo.from}-to-${migInfo.to}`);
-    try { backupFile(DATA_FILE, backupDir); } catch {}
+    try { backupFile(DATA_FILE, backupDir); } catch (e) { console.warn(`[DB][migrate] pre-migration backup failed (proceeding): ${e?.message || e}`); }
     pruneOldBackups();
   }
 }

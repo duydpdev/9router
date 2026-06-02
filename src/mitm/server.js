@@ -209,7 +209,7 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
       if (dumper) { dumper.writeChunk(`\n[ERROR h2] ${e.message}\n`); dumper.end(); }
       if (!res.headersSent) res.writeHead(502);
       if (!res.writableEnded) res.end("Bad Gateway");
-      try { client.close(); } catch {}
+      try { client.close(); } catch { /* best-effort socket close */ }
       resolve();
     });
 
@@ -237,8 +237,8 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
       stream.on("end", () => {
         if (dumper) dumper.end();
         if (!res.writableEnded) res.end();
-        if (onResponse) try { onResponse(Buffer.concat(chunks), outHeaders); } catch {}
-        try { client.close(); } catch {}
+        if (onResponse) try { onResponse(Buffer.concat(chunks), outHeaders); } catch { /* observer callback must not break proxy */ }
+        try { client.close(); } catch { /* best-effort socket close */ }
         resolve();
       });
     });
@@ -247,7 +247,7 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
       if (dumper) { dumper.writeChunk(`\n[ERROR h2-stream] ${e.message}\n`); dumper.end(); }
       if (!res.headersSent) res.writeHead(502);
       if (!res.writableEnded) res.end();
-      try { client.close(); } catch {}
+      try { client.close(); } catch { /* best-effort socket close */ }
       resolve();
     });
   });

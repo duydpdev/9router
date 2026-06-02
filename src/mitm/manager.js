@@ -332,7 +332,7 @@ async function killLeftoverMitm(sudoPassword) {
       const escaped = SERVER_PATH.replace(/'/g, "'\\''");
       if (sudoPassword || isSudoAvailable()) {
         const { execWithPassword } = require("./dns/dnsConfig");
-        await execWithPassword(`pkill -SIGKILL -f "${escaped}" 2>/dev/null || true`, sudoPassword || "").catch(() => { });
+        await execWithPassword(`pkill -SIGKILL -f "${escaped}" 2>/dev/null || true`, sudoPassword || "").catch(() => { /* best-effort kill */ });
       } else {
         exec(`pkill -SIGKILL -f "${escaped}" 2>/dev/null || true`, { windowsHide: true }, () => { });
       }
@@ -595,7 +595,7 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
       }
     );
 
-    if (_updateSettings) await _updateSettings({ mitmCertInstalled: true }).catch(() => { });
+    if (_updateSettings) await _updateSettings({ mitmCertInstalled: true }).catch(() => { /* best-effort flag persist */ });
   } else if (isSudoAvailable()) {
     // Pass HOME explicitly so os.homedir() resolves to the unprivileged user's home
     // instead of /root when sudo resets the environment.

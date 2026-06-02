@@ -6,6 +6,7 @@ import { execSync, exec, spawn } from "child_process";
 import { promisify } from "util";
 import { execWithPassword } from "@/mitm/dns/dnsConfig";
 import { DATA_DIR } from "@/lib/dataDir.js";
+import * as logger from "@/sse/utils/logger.js";
 
 const execAsync = promisify(exec);
 
@@ -467,7 +468,7 @@ export async function startDaemonWithPassword(sudoPassword) {
     // Windows: tailscale runs as a Windows Service. Start it then poll BackendState
     // until daemon finishes init (avoids "NoState" errors when calling funnel/up too early).
     const bin = getTailscaleBin();
-    console.log("[Tailscale] win: net start Tailscale");
+    logger.debug("Tailscale", "win: net start Tailscale");
     try { execSync("net start Tailscale", { stdio: "ignore", windowsHide: true, timeout: 10000 }); }
     catch { /* may need admin, or already running */ }
     if (!bin) return;
@@ -477,13 +478,13 @@ export async function startDaemonWithPassword(sudoPassword) {
         const out = execSync(`"${bin}" status --json`, { encoding: "utf8", windowsHide: true, timeout: 2000 });
         const j = JSON.parse(out);
         if (j.BackendState && j.BackendState !== "NoState") {
-          console.log(`[Tailscale] win: BackendState=${j.BackendState} after ${i*500}ms`);
+          logger.debug("Tailscale", `win: BackendState=${j.BackendState} after ${i*500}ms`);
           return;
         }
       } catch { /* daemon not ready */ }
       await new Promise((r) => setTimeout(r, 500));
     }
-    console.log("[Tailscale] win: BackendState still NoState after poll");
+    logger.warn("Tailscale", "win: BackendState still NoState after poll");
     return;
   }
 
@@ -605,7 +606,7 @@ export function startLogin(hostname) {
       resolved = true;
       clearTimeout(timeout);
       clearInterval(statusPoll);
-      console.log(`[Tailscale] login authUrl detected (${source})`);
+      logger.debug("Tailscale", `login authUrl detected (${source})`);
       child.unref();
       resolve({ authUrl: url });
     };
@@ -641,13 +642,13 @@ export function startLogin(hostname) {
       resolved = true;
       clearTimeout(timeout);
       clearInterval(statusPoll);
-      console.error(`[Tailscale] login spawn error: ${err.message}`);
+      logger.error("Tailscale", `login spawn error: ${err.message}`);
       reject(err);
     });
 
     child.on("exit", (code) => {
       if (resolved) return;
-      console.log(`[Tailscale] login exit code=${code}`);
+      logger.debug("Tailscale", `login exit code=${code}`);
       // Don't trust exit code alone — Win `tailscale up` exits 0 even when not logged in.
       // Let status poll continue until AuthURL appears or timeout.
       const url = parseAuthUrl(output) || getAuthUrlFromStatus();
@@ -731,7 +732,7 @@ export async function startFunnel(port) {
       if (resolved) return;
       resolved = true;
       clearTimeout(timeout);
-      console.log(`[Tailscale] funnel exit code=${code} output="${output.trim().slice(0, 200)}"`);
+      logger.debug("Tailscale", `funnel exit code=${code} output="${output.trim().slice(0, 200)}"`);
       const url = parseFunnelUrl() || getTailscaleFunnelUrl(port);
       if (url) resolve({ tunnelUrl: url });
       else reject(new Error(`tailscale funnel failed (code ${code}): ${output.trim()}`));
@@ -759,9 +760,9 @@ export async function provisionCert(hostname) {
       `"${bin}" ${SOCKET_FLAG.join(" ")} cert --cert-file "${certFile}" --key-file "${keyFile}" "${hostname}"`,
       { windowsHide: true, env: { ...process.env, PATH: EXTENDED_PATH }, timeout: 30000 }
     );
-    console.log(`[Tailscale] cert provisioned for ${hostname}`);
+    logger.debug("Tailscale", `cert provisioned for ${hostname}`);
   } catch (e) {
-    console.warn(`[Tailscale] cert provision failed (non-fatal): ${e.message}`);
+    logger.warn("Tailscale", `cert provision failed (non-fatal): ${e.message}`);
   }
 }
 

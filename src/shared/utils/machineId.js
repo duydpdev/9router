@@ -18,7 +18,7 @@ function loadRawMachineId() {
   try {
     cachedRawId = fs.readFileSync(MACHINE_ID_FILE, 'utf8').trim();
     if (cachedRawId) return cachedRawId;
-  } catch {}
+  } catch { /* intentional: no persisted id yet (first run) → derive below */ }
   try {
     cachedRawId = machineIdSync();
   } catch {
@@ -27,7 +27,7 @@ function loadRawMachineId() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(MACHINE_ID_FILE, cachedRawId, { mode: 0o600 });
-  } catch {}
+  } catch { /* best-effort persist: in-memory id still works this run */ }
   return cachedRawId;
 }
 
@@ -37,12 +37,12 @@ function loadCliSecret() {
   try {
     cachedCliSecret = fs.readFileSync(CLI_SECRET_FILE, 'utf8').trim();
     if (cachedCliSecret) return cachedCliSecret;
-  } catch {}
+  } catch { /* intentional: no secret yet (first run) → generate below */ }
   cachedCliSecret = crypto.randomBytes(32).toString('hex');
   try {
     fs.mkdirSync(AUTH_DIR, { recursive: true });
     fs.writeFileSync(CLI_SECRET_FILE, cachedCliSecret, { mode: 0o600 });
-  } catch {}
+  } catch { /* best-effort persist: in-memory secret still works this run */ }
   return cachedCliSecret;
 }
 
