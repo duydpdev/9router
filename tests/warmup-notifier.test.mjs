@@ -18,6 +18,7 @@ import {
   redactSecrets,
   tryReserveFailureSlot,
   tryReserveRecoverySlot,
+  tryReserveNotRegisteredSlot,
 } from "../src/lib/warmup/notifier.js";
 
 test("isValidDiscordWebhook accepts canonical discord webhook hosts", () => {
@@ -350,6 +351,93 @@ test("buildDigestPayload returns channel-aware summary with batch sample", () =>
   assert.equal(generic.event, "warmup.digest");
   assert.equal(generic.batchSize, 2);
   assert.ok(Array.isArray(generic.sample));
+});
+
+// --- not_registered kind: distinct payloads via KIND_META ---
+
+test("Discord not_registered payload mentions session not registering, includes resetsAt", () => {
+  __resetForTests({});
+  const payload = buildDiscordPayload("not_registered", {
+    schedule: { id: "s1", name: "Morning", timezone: "UTC" },
+    connection: { id: "c1", name: "Claude-A", provider: "claude" },
+    run: { localDate: "2026-06-02", localTime: "09:00", sessionState: "not-registered", resetsAt: "2026-06-02T14:47:00.000Z" },
+  });
+  assert.ok(payload.content.toLowerCase().includes("did not register") || payload.content.toLowerCase().includes("not register"));
+  assert.ok(payload.content.includes("Claude-A"));
+  assert.ok(payload.content.includes("claude"));
+  assert.ok(payload.content.includes("2026-06-02T14:47:00.000Z"));
+  assert.deepEqual(payload.allowed_mentions, { parse: [] });
+  assert.ok(payload.content.length <= 2000);
+  // distinct from failure wording
+  assert.ok(!payload.content.includes("Warmup failed"));
+});
+
+test("Telegram not_registered payload is MarkdownV2 and distinct from failure", () => {
+  __resetForTests({});
+  const payload = buildTelegramPayload("not_registered", {
+    schedule: { id: "s1", name: "Morning", timezone: "UTC" },
+    connection: { id: "c1", name: "A", provider: "claude" },
+    run: { localDate: "2026-06-02", localTime: "09:00", sessionState: "not-registered", resetsAt: "2026-06-02T14:47:00.000Z" },
+  }, "987654321");
+  assert.equal(payload.parse_mode, "MarkdownV2");
+  assert.ok(!payload.text.includes("Warmup Failed"));
+  assert.ok(payload.text.toLowerCase().includes("register"));
+});
+
+test("Generic not_registered payload emits warmup.not_registered event (proves map, not failure ternary)", () => {
+  __resetForTests({});
+  const payload = buildGenericPayload("not_registered", {
+    schedule: { id: "s1", name: "X", timezone: "UTC" },
+    connection: { id: "c1", name: "A", provider: "claude" },
+    run: { localDate: "2026-06-02", localTime: "09:00", scheduledForUtc: "2026-06-02T02:00:00.000Z", sessionState: "not-registered", resetsAt: "2026-06-02T14:47:00.000Z" },
+  });
+  assert.equal(payload.event, "warmup.not_registered");
+  assert.equal(payload.run.sessionState, "not-registered");
+  assert.equal(payload.run.resetsAt, "2026-06-02T14:47:00.000Z");
+});
+
+test("name-field injection neutralized: backticks + @here in connection name", () => {
+  __resetForTests({});
+  const ctx = {
+    schedule: { id: "s1", name: "X", timezone: "UTC" },
+    connection: { id: "c1", name: "evil`@here`", provider: "claude" },
+    run: { localDate: "2026-06-02", localTime: "09:00", sessionState: "not-registered", resetsAt: null },
+  };
+  const disc = buildDiscordPayload("not_registered", ctx);
+  assert.ok(!disc.content.includes("@here"), "Discord must neutralize @here in name");
+  const tg = buildTelegramPayload("not_registered", ctx, "1");
+  // backticks in name escaped under MarkdownV2
+  assert.ok(tg.text.includes("\\`"), "Telegram must escape backticks in name");
+});
+
+test("not_registered budget is independent from failure and recovery budgets (Finding 9)", () => {
+  __resetForTests({ rateLimitPerHour: 1, recoveryRateLimitPerHour: 1, notRegisteredRateLimitPerHour: 1 });
+  const t0 = Date.now();
+  // Exhaust not-registered budget
+  assert.equal(tryReserveNotRegisteredSlot(t0), true);
+  assert.equal(tryReserveNotRegisteredSlot(t0 + 1), false);
+  // Failure + recovery budgets untouched
+  assert.equal(tryReserveFailureSlot(t0 + 2), true);
+  assert.equal(tryReserveRecoverySlot(t0 + 3), true);
+});
+
+test("digest carries a labeled not-registered section distinct from failures", () => {
+  __resetForTests({});
+  const batch = [
+    { scheduleId: "s1", scheduleName: "Morning", connectionId: "c1", localDate: "2026-06-02", localTime: "09:00", error: "boom" },
+  ];
+  const notReg = [
+    { scheduleId: "s2", scheduleName: "Noon", connectionId: "c2", localDate: "2026-06-02", localTime: "12:00", resetsAt: "2026-06-02T17:00:00.000Z", sessionState: "not-registered" },
+  ];
+  const disc = buildDigestPayload("discord", batch, notReg);
+  assert.ok(disc.content.includes("c2"), "not-registered connection present");
+  assert.ok(disc.content.toLowerCase().includes("not register") || disc.content.toLowerCase().includes("not-registered"));
+  assert.ok(disc.content.includes("boom"), "failure section still present");
+
+  const generic = buildDigestPayload("generic", batch, notReg);
+  assert.equal(generic.batchSize, 1);
+  assert.ok(Array.isArray(generic.notRegistered));
+  assert.equal(generic.notRegistered.length, 1);
 });
 
 // --- Logger emits JSON.parse-able line ---

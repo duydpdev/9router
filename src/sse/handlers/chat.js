@@ -50,7 +50,20 @@ export async function handleInternalWarmupChat(request, clientRawRequest = null)
   }
 
   cacheClaudeHeaders(clientRawRequest.headers);
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, null);
+  // Surface which connection actually served the request (after any fallback)
+  // so the warmup runner can tell a genuine "session not registered" from a
+  // known router divert. Best-effort: header set fails silently on immutable
+  // (streaming) responses, and the runner falls back to "unknown".
+  const servedRef = {};
+  const response = await handleSingleModelChat(body, modelStr, clientRawRequest, request, null, servedRef);
+  if (servedRef.connectionId) {
+    try {
+      response.headers.set("x-9router-served-connection-id", servedRef.connectionId);
+    } catch {
+      // immutable headers — served id unobtainable; runner treats as unknown.
+    }
+  }
+  return response;
 }
 
 export async function handleChat(request, clientRawRequest = null) {
@@ -146,7 +159,7 @@ export async function handleChat(request, clientRawRequest = null) {
 /**
  * Handle single model chat request
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, servedRef = null) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -267,7 +280,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      if (servedRef) servedRef.connectionId = credentials.connectionId;
+      return result.response;
+    }
 
     // Mark account unavailable (auto-calculates cooldown with exponential backoff, or precise resetsAtMs)
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, result.resetsAtMs);

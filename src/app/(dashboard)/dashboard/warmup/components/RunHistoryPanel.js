@@ -12,6 +12,8 @@ export default function RunHistoryPanel({ runs, providerOptions, meta, onLimitCh
   const [selectedRun, setSelectedRun] = useState(null);
   const names = useMemo(() => new Map((providerOptions || []).map((option) => [option.id, option.displayName])), [providerOptions]);
   const groups = useMemo(() => groupRuns(runs), [runs]);
+  // Captured once per render — countdown is a snapshot, no per-second ticking.
+  const now = Date.now();
 
   return (
     <Card padding="none" className="overflow-hidden">
@@ -48,7 +50,9 @@ export default function RunHistoryPanel({ runs, providerOptions, meta, onLimitCh
               </div>
               <div className="space-y-1">
                 {group.items.map((run) => {
-                  const failed = run.status === "failure";
+                  const status = statusMeta(run);
+                  const badge = sessionBadgeMeta(run.sessionState);
+                  const countdown = formatCountdown(run.resetsAt, now);
                   return (
                     <button
                       key={run.id}
@@ -56,13 +60,17 @@ export default function RunHistoryPanel({ runs, providerOptions, meta, onLimitCh
                       onClick={() => setSelectedRun(run)}
                       className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5"
                     >
-                      <span className={`size-2.5 rounded-full ${failed ? "bg-red-500" : "bg-green-500"}`} />
+                      <span className={`size-2.5 rounded-full ${status.dot}`} />
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-text-main">{names.get(run.providerConnectionId) || run.providerConnectionId}</span>
-                        <span className="block truncate text-xs text-text-muted">{run.localTime || run.scheduledForUtc}</span>
+                        <span className="flex items-center gap-2 truncate text-xs text-text-muted">
+                          <span className="truncate">{run.localTime || run.scheduledForUtc}</span>
+                          {badge && <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}>{badge.label}</span>}
+                          {countdown && <span className="shrink-0">· {countdown}</span>}
+                        </span>
                       </span>
-                      <span className={`text-xs font-semibold ${failed ? "text-red-500" : "text-green-500"}`}>
-                        {failed ? "Fail" : "OK"}
+                      <span className={`text-xs font-semibold ${status.text}`}>
+                        {status.label}
                       </span>
                     </button>
                   );
@@ -94,6 +102,14 @@ export default function RunHistoryPanel({ runs, providerOptions, meta, onLimitCh
             <Detail label="Status" value={selectedRun.status} />
             <Detail label="Scheduled" value={selectedRun.localDate && selectedRun.localTime ? `${selectedRun.localDate} ${selectedRun.localTime}` : selectedRun.scheduledForUtc} />
             <Detail label="Created" value={selectedRun.createdAt} />
+            {sessionBadgeMeta(selectedRun.sessionState) && (
+              <>
+                <Detail label="Session state" value={sessionBadgeMeta(selectedRun.sessionState).label} />
+                <Detail label="5h window resets" value={formatResetTime(selectedRun.resetsAt, selectedRun.timezone) || "—"} />
+                <Detail label="Resets in" value={formatCountdown(selectedRun.resetsAt, now) || "—"} />
+                <Detail label="Utilization" value={typeof selectedRun.utilization === "number" ? `${selectedRun.utilization}% used` : "—"} />
+              </>
+            )}
             {selectedRun.error && (
               <div>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-text-muted">Error</p>
@@ -114,6 +130,53 @@ function Detail({ label, value }) {
       <p className="mt-1 break-all text-text-main">{value || "—"}</p>
     </div>
   );
+}
+
+// Status dot/label derive from BOTH status and session_state so a 200 warmup
+// that did not register a session shows amber, not a misleading green.
+function statusMeta(run) {
+  if (run.status === "failure") return { dot: "bg-red-500", text: "text-red-500", label: "Fail" };
+  if (run.sessionState === "not-registered") return { dot: "bg-amber-500", text: "text-amber-500", label: "No session" };
+  return { dot: "bg-green-500", text: "text-green-500", label: "OK" };
+}
+
+// Badge derives from session_state. n/a / null (non-session or old rows) → no badge.
+function sessionBadgeMeta(sessionState) {
+  switch (sessionState) {
+    case "active":
+      return { label: "session active", className: "bg-green-500/15 text-green-500" };
+    case "not-registered":
+      return { label: "not registered", className: "bg-amber-500/15 text-amber-500" };
+    case "unknown":
+      return { label: "unknown", className: "bg-black/10 text-text-muted dark:bg-white/10" };
+    default:
+      return null;
+  }
+}
+
+function formatResetTime(resetsAt, timezone) {
+  if (!resetsAt) return null;
+  const d = new Date(resetsAt);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone || "UTC",
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(d);
+  } catch {
+    return d.toISOString();
+  }
+}
+
+function formatCountdown(resetsAt, now) {
+  if (!resetsAt) return null;
+  const ms = new Date(resetsAt).getTime() - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `resets in ${h}h${String(m).padStart(2, "0")}m`;
 }
 
 function groupRuns(runs) {
@@ -141,6 +204,10 @@ RunHistoryPanel.propTypes = {
     scheduledForUtc: PropTypes.string,
     createdAt: PropTypes.string,
     error: PropTypes.string,
+    timezone: PropTypes.string,
+    sessionState: PropTypes.string,
+    resetsAt: PropTypes.string,
+    utilization: PropTypes.number,
   })),
   providerOptions: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string.isRequired,

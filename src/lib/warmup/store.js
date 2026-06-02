@@ -101,6 +101,12 @@ export async function appendWarmupRun(run) {
     status: run.status,
     error: run.error || null,
     createdAt: run.createdAt || new Date().toISOString(),
+    // Session-window fields (Claude/Codex). Built explicitly because nextRun is
+    // assembled field-by-field with no `...run` spread — anything not listed
+    // here is silently dropped before reaching the repo.
+    resetsAt: run.resetsAt ?? null,
+    utilization: run.utilization ?? null,
+    sessionState: run.sessionState ?? "n/a",
   };
   await insertWarmupRun(nextRun);
   return nextRun;

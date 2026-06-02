@@ -25,7 +25,9 @@ export async function insertWarmupRun(run) {
   const db = await getAdapter();
   db.transaction(() => {
     db.run(
-      `INSERT INTO warmup_runs(id, schedule_id, provider_connection_id, scheduled_for_utc, actual_ran_at, local_date, local_time, timezone, dedupe_key, status, error, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      // New session columns are appended at the END of both the column list
+      // and the bindings array, in identical order — keep them in lockstep.
+      `INSERT INTO warmup_runs(id, schedule_id, provider_connection_id, scheduled_for_utc, actual_ran_at, local_date, local_time, timezone, dedupe_key, status, error, created_at, resets_at, utilization, session_state) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         run.id,
         run.scheduleId,
@@ -39,6 +41,9 @@ export async function insertWarmupRun(run) {
         run.status,
         run.error || null,
         run.createdAt,
+        run.resetsAt ?? null,
+        run.utilization ?? null,
+        run.sessionState ?? "n/a",
       ]
     );
     db.run(
@@ -89,6 +94,9 @@ function rowToRun(r) {
     status: r.status,
     error: r.error,
     createdAt: r.created_at,
+    resetsAt: r.resets_at,
+    utilization: r.utilization,
+    sessionState: r.session_state,
   };
 }
 

@@ -628,13 +628,24 @@ function getCodexRateLimitBody(snapshot) {
     : snapshot;
 }
 
-function formatCodexWindow(window) {
+export function formatCodexWindow(window) {
   const used = Math.max(0, Math.min(100, toFiniteNumber(window?.used_percent ?? window?.percent_used, 0)));
+  // Prefer an absolute reset timestamp. Some Codex windows expose only a
+  // relative duration (resets_in_seconds) and no absolute reset — derive the
+  // absolute reset = now + duration so a session window is not lost.
+  let resetAt = parseResetTime(window?.reset_at ?? window?.resets_at ?? window?.resetAt ?? null);
+  if (!resetAt) {
+    const secs = toFiniteNumber(
+      window?.resets_in_seconds ?? window?.reset_after_seconds ?? window?.resets_in ?? window?.seconds_until_reset,
+      0,
+    );
+    if (secs > 0) resetAt = new Date(Date.now() + secs * 1000).toISOString();
+  }
   return {
     used,
     total: 100,
     remaining: Math.max(0, 100 - used),
-    resetAt: parseResetTime(window?.reset_at ?? window?.resets_at ?? window?.resetAt ?? null),
+    resetAt,
     unlimited: false,
   };
 }

@@ -314,6 +314,34 @@ they emit a `manual_reimport_needed` notification kind instead of trying a
 broken auto-OAuth round-trip, and the dashboard surfaces a "Re-import" CTA
 instead of "Reconnect".
 
+### Session-Aware Warmup (Claude/Codex 5h Window Tracking)
+
+A warmup HTTP 200 proves the request returned — not that the pinned account's
+5h session window actually opened. After a Claude/Codex warmup succeeds, the
+runner (`src/lib/warmup/runner.js::probeSession`) polls the usage endpoint via
+the shared `src/lib/usage/fetch-usage-for-connection.js` (token refresh +
+proxy resolve + auth-expired retry — the same path the usage route uses) and
+classifies the session via `src/lib/warmup/session-state.js`.
+
+- `warmup_runs` carries three additive nullable columns: `resets_at` (5h
+  window reset, ISO), `utilization` (% **used**), `session_state`.
+- `session_state ∈ {active, not-registered, unknown, n/a}` (`null` = pre-migration
+  row). Run `status` stays `success`/`failure` — the session signal lives only
+  in `session_state`; no new status value, dedupe unchanged.
+- The poll only classifies `not-registered` when the account that **served** the
+  warmup equals the pinned one (served id surfaced via the
+  `x-9router-served-connection-id` response header threaded through
+  `handleInternalWarmupChat`). A router divert → `n/a`; served id unobtainable →
+  `unknown`. A `not-registered` first poll triggers one confirmation re-poll
+  (`NOT_REGISTERED_REPOLL_MS`, default 5s) to absorb usage-endpoint propagation
+  lag before committing.
+- `not-registered` gets its OWN notifier budget
+  (`WARMUP_NOTIFY_NOT_REGISTERED_RATE_LIMIT_PER_HOUR`, default 5) so a mis-warm
+  burst cannot crowd out real failure pages. Real-time alert =
+  `notifyWarmupNotRegistered`; catch-up folds a labeled section into the existing
+  digest. The dashboard run row/badge derive the dot from BOTH status and
+  `session_state` (a `not-registered` run shows amber, never green).
+
 ## Cloud Sync Lifecycle (Enable / Sync / Disable)
 
 ```mermaid

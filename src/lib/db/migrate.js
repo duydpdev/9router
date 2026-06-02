@@ -126,7 +126,7 @@ function migrateLegacyWarmupRunsSync(adapter) {
 }
 
 // ─── Auto-sync (additive only): add missing tables/columns/indexes ───────
-function syncSchemaFromTables(adapter) {
+export function syncSchemaFromTables(adapter) {
   for (const [tableName, def] of Object.entries(TABLES)) {
     // Create table if absent
     adapter.exec(buildCreateTableSql(tableName, def));

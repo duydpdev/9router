@@ -162,6 +162,11 @@ export const TABLES = {
       status: "TEXT NOT NULL",
       error: "TEXT",
       created_at: "TEXT NOT NULL",
+      // Session-window tracking (Claude/Codex 5h window). Nullable + additive:
+      // syncSchemaFromTables ADD COLUMNs these on existing DBs. Old rows read null.
+      resets_at: "TEXT",
+      utilization: "REAL",
+      session_state: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_warmup_runs_created ON warmup_runs(created_at DESC)",

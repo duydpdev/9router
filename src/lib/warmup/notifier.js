@@ -3,6 +3,9 @@ import { fetch as undiciFetch, ProxyAgent } from "undici";
 
 const DEFAULT_RATE_LIMIT_PER_HOUR = 30;
 const DEFAULT_RECOVERY_RATE_LIMIT_PER_HOUR = 5;
+// not-registered gets its OWN budget so a burst of mis-warms cannot crowd out
+// real failure pages. Defaults to the recovery cap.
+const DEFAULT_NOT_REGISTERED_RATE_LIMIT_PER_HOUR = 5;
 const DEFAULT_RECOVERY_AFTER_FAILS = 3;
 const FETCH_TIMEOUT_MS = 5000;
 const DISCORD_MAX_CONTENT = 2000;
@@ -30,6 +33,7 @@ let DISPATCHER_URI = null;
 const recoveryState = new Map();
 const rateLimitWindow = [];
 const recoveryWindow = [];
+const notRegisteredWindow = [];
 
 // Cache ProxyAgent at module scope — undici keeps a connection pool per agent,
 // so reusing it avoids socket leaks across fan-outs.
@@ -66,6 +70,10 @@ function readEnv(env = process.env) {
   const rateLimitPerHour = parseInt(env.WARMUP_NOTIFY_RATE_LIMIT_PER_HOUR || "", 10);
   const recoveryRateLimitPerHour = parseInt(
     env.WARMUP_NOTIFY_RECOVERY_RATE_LIMIT_PER_HOUR || "",
+    10,
+  );
+  const notRegisteredRateLimitPerHour = parseInt(
+    env.WARMUP_NOTIFY_NOT_REGISTERED_RATE_LIMIT_PER_HOUR || "",
     10,
   );
   const recoveryAfterFails = parseInt(env.WARMUP_NOTIFY_RECOVERY_AFTER_FAILS || "", 10);
@@ -105,6 +113,10 @@ function readEnv(env = process.env) {
       Number.isFinite(recoveryRateLimitPerHour) && recoveryRateLimitPerHour >= 0
         ? recoveryRateLimitPerHour
         : DEFAULT_RECOVERY_RATE_LIMIT_PER_HOUR,
+    notRegisteredRateLimitPerHour:
+      Number.isFinite(notRegisteredRateLimitPerHour) && notRegisteredRateLimitPerHour >= 0
+        ? notRegisteredRateLimitPerHour
+        : DEFAULT_NOT_REGISTERED_RATE_LIMIT_PER_HOUR,
     recoveryAfterFails:
       Number.isFinite(recoveryAfterFails) && recoveryAfterFails >= 1
         ? recoveryAfterFails
@@ -222,6 +234,10 @@ export function tryReserveRecoverySlot(nowMs = Date.now()) {
   return tryReserve(recoveryWindow, getNotifierConfig().recoveryRateLimitPerHour, nowMs);
 }
 
+export function tryReserveNotRegisteredSlot(nowMs = Date.now()) {
+  return tryReserve(notRegisteredWindow, getNotifierConfig().notRegisteredRateLimitPerHour, nowMs);
+}
+
 function tryReserve(windowArr, cap, nowMs) {
   if (cap <= 0) return false;
   const cutoff = nowMs - 60 * 60 * 1000;
@@ -268,32 +284,54 @@ export function getNotifierDispatcher() {
   return getDispatcher(getNotifierConfig().proxyUrl);
 }
 
+// Per-kind presentation metadata. A single lookup avoids three parallel
+// recovery/failure branch chains and the trap where the generic event ternary
+// silently emits warmup.failure for a new kind.
+const KIND_META = {
+  recovery: { emoji: "✅", discordTitle: "Warmup recovered", tgTitle: "9Router Warmup Recovered", event: "warmup.recovery" },
+  failure: { emoji: "🔥", discordTitle: "Warmup failed", tgTitle: "9Router Warmup Failed", event: "warmup.failure" },
+  not_registered: {
+    emoji: "⚠️",
+    discordTitle: "Warmup did not register a session",
+    tgTitle: "9Router Warmup Did Not Register a Session",
+    event: "warmup.not_registered",
+  },
+};
+
+function kindMeta(kind) {
+  return KIND_META[kind] || KIND_META.failure;
+}
+
 // red-team #4: Discord — allowed_mentions parse=[], truncate error to 1500, total≤2000.
 export function buildDiscordPayload(kind, ctx) {
-  const scheduleName = ctx?.schedule?.name ?? "(schedule)";
-  const connectionName = ctx?.connection?.name ?? ctx?.connection?.id ?? "(connection)";
-  const provider = ctx?.connection?.provider ?? "(provider)";
+  const meta = kindMeta(kind);
+  // Name/provider/schedule run through mention-sanitize too — not just `err` —
+  // closing a latent @mention/markdown-injection hole in the name fields.
+  const scheduleName = sanitizeDiscordMentions(ctx?.schedule?.name ?? "(schedule)");
+  const connectionName = sanitizeDiscordMentions(ctx?.connection?.name ?? ctx?.connection?.id ?? "(connection)");
+  const provider = sanitizeDiscordMentions(ctx?.connection?.provider ?? "(provider)");
   const tz = ctx?.schedule?.timezone ?? "";
   const when = `${ctx?.run?.localDate ?? ""} ${ctx?.run?.localTime ?? ""}`.trim();
+
+  const head =
+    `${meta.emoji} **${meta.discordTitle}** — \`${connectionName}\` (${provider})\n` +
+    `Schedule: **${scheduleName}** ${tz ? `(${tz})` : ""}\n` +
+    `Time: ${when}`;
 
   let content;
   if (kind === "recovery") {
     const fails = ctx?.distinctFails ?? 0;
+    content = `${head}\nRecovered after ${fails} consecutive failures.`;
+  } else if (kind === "not_registered") {
+    const reset = sanitizeDiscordMentions(String(ctx?.run?.resetsAt ?? "unknown"));
+    const state = sanitizeDiscordMentions(String(ctx?.run?.sessionState ?? "not-registered"));
     content =
-      `✅ **Warmup recovered** — \`${connectionName}\` (${provider})\n` +
-      `Schedule: **${scheduleName}** ${tz ? `(${tz})` : ""}\n` +
-      `Time: ${when}\n` +
-      `Recovered after ${fails} consecutive failures.`;
+      `${head}\nThe request returned 200 but no active 5h session window registered.\n` +
+      `Session state: ${state} · Reset: ${reset}`;
   } else {
     const errRaw = ctx?.run?.error ?? "(no error message)";
     const err = sanitizeDiscordMentions(truncate(errRaw, ERROR_TRUNCATE));
-    content =
-      `🔥 **Warmup failed** — \`${connectionName}\` (${provider})\n` +
-      `Schedule: **${scheduleName}** ${tz ? `(${tz})` : ""}\n` +
-      `Time: ${when}\n` +
-      "```\n" +
-      err +
-      "\n```";
+    content = `${head}\n` + "```\n" + err + "\n```";
   }
   if (content.length > DISCORD_MAX_CONTENT) {
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + "…";
@@ -303,44 +341,39 @@ export function buildDiscordPayload(kind, ctx) {
 
 // red-team #7: Telegram MarkdownV2.
 export function buildTelegramPayload(kind, ctx, chatId) {
+  const meta = kindMeta(kind);
   const scheduleName = escapeMarkdownV2(ctx?.schedule?.name ?? "(schedule)");
-  const connectionName = escapeMarkdownV2(
-    ctx?.connection?.name ?? ctx?.connection?.id ?? "(connection)",
-  );
+  const connectionName = escapeMarkdownV2(ctx?.connection?.name ?? ctx?.connection?.id ?? "(connection)");
   const provider = escapeMarkdownV2(ctx?.connection?.provider ?? "(provider)");
   const tz = escapeMarkdownV2(ctx?.schedule?.timezone ?? "");
-  const when = escapeMarkdownV2(
-    `${ctx?.run?.localDate ?? ""} ${ctx?.run?.localTime ?? ""}`.trim(),
-  );
+  const when = escapeMarkdownV2(`${ctx?.run?.localDate ?? ""} ${ctx?.run?.localTime ?? ""}`.trim());
+
+  const head =
+    `${meta.emoji} *${escapeMarkdownV2(meta.tgTitle)}*\n` +
+    `Connection: \`${connectionName}\` \\(${provider}\\)\n` +
+    `Schedule: *${scheduleName}*${tz ? ` \\(${tz}\\)` : ""}\n` +
+    `Time: ${when}`;
 
   let text;
   if (kind === "recovery") {
     const fails = ctx?.distinctFails ?? 0;
-    text =
-      `✅ *9Router Warmup Recovered*\n` +
-      `Connection: \`${connectionName}\` \\(${provider}\\)\n` +
-      `Schedule: *${scheduleName}*${tz ? ` \\(${tz}\\)` : ""}\n` +
-      `Time: ${when}\n` +
-      `Recovered after ${escapeMarkdownV2(String(fails))} consecutive failures\\.`;
+    text = `${head}\nRecovered after ${escapeMarkdownV2(String(fails))} consecutive failures\\.`;
+  } else if (kind === "not_registered") {
+    const reset = escapeMarkdownV2(String(ctx?.run?.resetsAt ?? "unknown"));
+    const state = escapeMarkdownV2(String(ctx?.run?.sessionState ?? "not-registered"));
+    text = `${head}\nReturned 200 but no active 5h session window registered\\.\nState: ${state} · Reset: ${reset}`;
   } else {
     const errRaw = ctx?.run?.error ?? "(no error message)";
     const err = escapeMarkdownV2(truncate(errRaw, ERROR_TRUNCATE));
-    text =
-      `🔥 *9Router Warmup Failed*\n` +
-      `Connection: \`${connectionName}\` \\(${provider}\\)\n` +
-      `Schedule: *${scheduleName}*${tz ? ` \\(${tz}\\)` : ""}\n` +
-      `Time: ${when}\n` +
-      "```\n" +
-      err +
-      "\n```";
+    text = `${head}\n` + "```\n" + err + "\n```";
   }
   return { chat_id: chatId, parse_mode: "MarkdownV2", text };
 }
 
 export function buildGenericPayload(kind, ctx) {
-  const errRaw = ctx?.run?.error;
+  const meta = kindMeta(kind);
   const payload = {
-    event: kind === "recovery" ? "warmup.recovery" : "warmup.failure",
+    event: meta.event,
     schedule: {
       id: ctx?.schedule?.id,
       name: ctx?.schedule?.name,
@@ -361,25 +394,40 @@ export function buildGenericPayload(kind, ctx) {
   };
   if (kind === "recovery") {
     payload.distinctFails = ctx?.distinctFails ?? 0;
-  } else if (errRaw !== undefined) {
-    payload.error = truncate(errRaw, ERROR_TRUNCATE);
+  } else if (kind === "not_registered") {
+    payload.run.sessionState = ctx?.run?.sessionState ?? "not-registered";
+    payload.run.resetsAt = ctx?.run?.resetsAt ?? null;
+  } else if (ctx?.run?.error !== undefined) {
+    payload.error = truncate(ctx.run.error, ERROR_TRUNCATE);
   }
   return payload;
 }
 
-// red-team #2: catch-up digest builder.
-export function buildDigestPayload(channel, batch) {
+// red-team #2: catch-up digest builder. Folds an optional not-registered batch
+// into the SAME message as a labeled section (one send, not a second message).
+export function buildDigestPayload(channel, batch, notRegisteredBatch = []) {
   const batchSize = Array.isArray(batch) ? batch.length : 0;
   const sample = (batch || []).slice(0, DIGEST_SAMPLE_LIMIT);
+  const nrSize = Array.isArray(notRegisteredBatch) ? notRegisteredBatch.length : 0;
+  const nrSample = (notRegisteredBatch || []).slice(0, DIGEST_SAMPLE_LIMIT);
 
   if (channel === "discord") {
-    const lines = sample.map(
-      (e) =>
-        `• \`${e.connectionId ?? "?"}\` — ${e.scheduleName ?? "?"} @ ${e.localDate ?? ""} ${e.localTime ?? ""}: ${sanitizeDiscordMentions(truncate(e.error ?? "", 200))}`,
-    );
-    let content =
-      `🔥 **Warmup catch-up digest** — ${batchSize} failures during outage\n` +
-      lines.join("\n");
+    const parts = [];
+    if (batchSize) {
+      const lines = sample.map(
+        (e) =>
+          `• \`${sanitizeDiscordMentions(String(e.connectionId ?? "?"))}\` — ${sanitizeDiscordMentions(String(e.scheduleName ?? "?"))} @ ${e.localDate ?? ""} ${e.localTime ?? ""}: ${sanitizeDiscordMentions(truncate(e.error ?? "", 200))}`,
+      );
+      parts.push(`🔥 **Warmup catch-up digest** — ${batchSize} failures during outage\n` + lines.join("\n"));
+    }
+    if (nrSize) {
+      const lines = nrSample.map(
+        (e) =>
+          `• \`${sanitizeDiscordMentions(String(e.connectionId ?? "?"))}\` — ${sanitizeDiscordMentions(String(e.scheduleName ?? "?"))} @ ${e.localDate ?? ""} ${e.localTime ?? ""} · reset ${sanitizeDiscordMentions(String(e.resetsAt ?? "unknown"))}`,
+      );
+      parts.push(`⚠️ **Did not register a session** — ${nrSize} warmup(s)\n` + lines.join("\n"));
+    }
+    let content = parts.join("\n\n");
     if (content.length > DISCORD_MAX_CONTENT) {
       content = content.slice(0, DISCORD_MAX_CONTENT - 1) + "…";
     }
@@ -387,17 +435,28 @@ export function buildDigestPayload(channel, batch) {
   }
 
   if (channel === "telegram") {
-    const lines = sample.map((e) => {
-      const conn = escapeMarkdownV2(e.connectionId ?? "?");
-      const name = escapeMarkdownV2(e.scheduleName ?? "?");
-      const when = escapeMarkdownV2(`${e.localDate ?? ""} ${e.localTime ?? ""}`.trim());
-      const err = escapeMarkdownV2(truncate(e.error ?? "", 200));
-      return `• \`${conn}\` — ${name} @ ${when}: ${err}`;
-    });
-    const text =
-      `🔥 *9Router Warmup catch\\-up digest* — ${escapeMarkdownV2(String(batchSize))} failures during outage\n` +
-      lines.join("\n");
-    return { parse_mode: "MarkdownV2", text };
+    const parts = [];
+    if (batchSize) {
+      const lines = sample.map((e) => {
+        const conn = escapeMarkdownV2(e.connectionId ?? "?");
+        const name = escapeMarkdownV2(e.scheduleName ?? "?");
+        const when = escapeMarkdownV2(`${e.localDate ?? ""} ${e.localTime ?? ""}`.trim());
+        const err = escapeMarkdownV2(truncate(e.error ?? "", 200));
+        return `• \`${conn}\` — ${name} @ ${when}: ${err}`;
+      });
+      parts.push(`🔥 *9Router Warmup catch\\-up digest* — ${escapeMarkdownV2(String(batchSize))} failures during outage\n` + lines.join("\n"));
+    }
+    if (nrSize) {
+      const lines = nrSample.map((e) => {
+        const conn = escapeMarkdownV2(e.connectionId ?? "?");
+        const name = escapeMarkdownV2(e.scheduleName ?? "?");
+        const when = escapeMarkdownV2(`${e.localDate ?? ""} ${e.localTime ?? ""}`.trim());
+        const reset = escapeMarkdownV2(String(e.resetsAt ?? "unknown"));
+        return `• \`${conn}\` — ${name} @ ${when} · reset ${reset}`;
+      });
+      parts.push(`⚠️ *Did not register a session* — ${escapeMarkdownV2(String(nrSize))} warmup\\(s\\)\n` + lines.join("\n"));
+    }
+    return { parse_mode: "MarkdownV2", text: parts.join("\n\n") };
   }
 
   // generic
@@ -411,6 +470,16 @@ export function buildDigestPayload(channel, batch) {
       localDate: e.localDate,
       localTime: e.localTime,
       error: truncate(e.error ?? "", ERROR_TRUNCATE),
+    })),
+    notRegisteredSize: nrSize,
+    notRegistered: nrSample.map((e) => ({
+      scheduleId: e.scheduleId,
+      scheduleName: e.scheduleName,
+      connectionId: e.connectionId,
+      localDate: e.localDate,
+      localTime: e.localTime,
+      resetsAt: e.resetsAt ?? null,
+      sessionState: e.sessionState ?? "not-registered",
     })),
     timestamp: new Date().toISOString(),
   };
@@ -531,12 +600,12 @@ async function fanOut(kind, cfg, ctx) {
   }
 }
 
-async function fanOutDigest(cfg, batch) {
+async function fanOutDigest(cfg, batch, notRegisteredBatch = []) {
   const dispatcher = getDispatcher(cfg.proxyUrl);
   const jobs = [];
   if (cfg.discord.enabled) {
     jobs.push(
-      sendDiscord(buildDigestPayload("discord", batch), cfg.discord.url, dispatcher).then((r) => ({
+      sendDiscord(buildDigestPayload("discord", batch, notRegisteredBatch), cfg.discord.url, dispatcher).then((r) => ({
         channel: "discord",
         ...r,
       })),
@@ -545,7 +614,7 @@ async function fanOutDigest(cfg, batch) {
   if (cfg.telegram.enabled) {
     jobs.push(
       sendTelegram(
-        { ...buildDigestPayload("telegram", batch), chat_id: cfg.telegram.chatId },
+        { ...buildDigestPayload("telegram", batch, notRegisteredBatch), chat_id: cfg.telegram.chatId },
         cfg.telegram.token,
         cfg.telegram.chatId,
         dispatcher,
@@ -554,7 +623,7 @@ async function fanOutDigest(cfg, batch) {
   }
   if (cfg.generic.enabled) {
     jobs.push(
-      sendGeneric(buildDigestPayload("generic", batch), cfg.generic.url, dispatcher).then((r) => ({
+      sendGeneric(buildDigestPayload("generic", batch, notRegisteredBatch), cfg.generic.url, dispatcher).then((r) => ({
         channel: "generic",
         ...r,
       })),
@@ -632,10 +701,37 @@ export async function notifyWarmupRecovery(ctx) {
   }
 }
 
-export async function notifyWarmupDigest({ batch } = {}) {
+export async function notifyWarmupNotRegistered(ctx) {
   try {
     const cfg = getNotifierConfig();
-    if (!cfg.enabled || !Array.isArray(batch) || batch.length === 0) return;
+    if (!cfg.enabled) return;
+    // Own budget — a mis-warm flood must not consume the failure budget.
+    if (!tryReserveNotRegisteredSlot()) {
+      log({
+        level: "info",
+        event: "rate_limited",
+        kind: "not_registered",
+        capPerHour: cfg.notRegisteredRateLimitPerHour,
+      });
+      return;
+    }
+    await fanOut("not_registered", cfg, ctx);
+  } catch (error) {
+    log({
+      level: "error",
+      event: "notify_exception",
+      kind: "not_registered",
+      reason: String(error?.message || error),
+    });
+  }
+}
+
+export async function notifyWarmupDigest({ batch = [], notRegisteredBatch = [] } = {}) {
+  try {
+    const cfg = getNotifierConfig();
+    const failures = Array.isArray(batch) ? batch : [];
+    const notReg = Array.isArray(notRegisteredBatch) ? notRegisteredBatch : [];
+    if (!cfg.enabled || (failures.length === 0 && notReg.length === 0)) return;
     if (!tryReserveFailureSlot()) {
       log({
         level: "info",
@@ -645,7 +741,7 @@ export async function notifyWarmupDigest({ batch } = {}) {
       });
       return;
     }
-    await fanOutDigest(cfg, batch);
+    await fanOutDigest(cfg, failures, notReg);
   } catch (error) {
     log({
       level: "error",
@@ -671,10 +767,12 @@ export function logBootStatus() {
     proxy: cfg.proxyUrl ? "[redacted-proxy]" : null,
     rateLimitPerHour: cfg.rateLimitPerHour,
     recoveryRateLimitPerHour: cfg.recoveryRateLimitPerHour,
+    notRegisteredRateLimitPerHour: cfg.notRegisteredRateLimitPerHour,
     recoveryAfterFails: cfg.recoveryAfterFails,
     "recoveryState.size": recoveryState.size,
     "rateLimitWindow.length": rateLimitWindow.length,
     "recoveryWindow.length": recoveryWindow.length,
+    "notRegisteredWindow.length": notRegisteredWindow.length,
   });
 }
 
@@ -695,6 +793,7 @@ export function __resetForTests(overrides = {}) {
   recoveryState.clear();
   rateLimitWindow.length = 0;
   recoveryWindow.length = 0;
+  notRegisteredWindow.length = 0;
   DISPATCHER = null;
   DISPATCHER_URI = null;
   CONFIG = Object.freeze({
@@ -719,6 +818,8 @@ export function __resetForTests(overrides = {}) {
     rateLimitPerHour: overrides.rateLimitPerHour ?? DEFAULT_RATE_LIMIT_PER_HOUR,
     recoveryRateLimitPerHour:
       overrides.recoveryRateLimitPerHour ?? DEFAULT_RECOVERY_RATE_LIMIT_PER_HOUR,
+    notRegisteredRateLimitPerHour:
+      overrides.notRegisteredRateLimitPerHour ?? DEFAULT_NOT_REGISTERED_RATE_LIMIT_PER_HOUR,
     recoveryAfterFails: overrides.recoveryAfterFails ?? DEFAULT_RECOVERY_AFTER_FAILS,
   });
 }
