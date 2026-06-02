@@ -7,9 +7,12 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   try {
-    const mod = await import("@/server-init");
-    const ensure = mod.ensureAppInitialized || mod.default;
-    if (typeof ensure === "function") await ensure();
+    // Importing bootstrap runs initializeApp() once — it self-guards via
+    // global.__appBootstrapped, so this does NOT double-init alongside the
+    // app/layout.js import. The import is fire-and-forget internally (bootstrap
+    // does not await initializeApp), so register() returns without blocking the
+    // server becoming ready.
+    await import("@/shared/services/bootstrap");
   } catch (error) {
     console.log("[Instrumentation] bootstrap failed:", error?.message || error);
   }
