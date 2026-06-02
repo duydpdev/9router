@@ -7,7 +7,11 @@ const LOG_LEVELS = {
   ERROR: 3
 };
 
-const LEVEL = LOG_LEVELS.DEBUG;
+// Level resolved once at module load. Explicit LOG_LEVEL wins; otherwise prod
+// defaults to INFO (silences DEBUG spam, keeps operational INFO/WARN/ERROR),
+// dev stays DEBUG-verbose. `?? ` is correct here — DEBUG is 0, not nullish.
+const LEVEL = LOG_LEVELS[(process.env.LOG_LEVEL || "").toUpperCase()]
+  ?? (process.env.NODE_ENV === "production" ? LOG_LEVELS.INFO : LOG_LEVELS.DEBUG);
 
 function formatTime() {
   return new Date().toLocaleTimeString("en-US", { hour12: false });
