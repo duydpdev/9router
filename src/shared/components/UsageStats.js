@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams, useRouter } from "next/navigation";
 import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
 
@@ -14,8 +15,19 @@ import Badge from "./Badge";
 import Card from "./Card";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
-import ProviderTopology from "@/app/(dashboard)/dashboard/usage/components/ProviderTopology";
-import UsageChart from "@/app/(dashboard)/dashboard/usage/components/UsageChart";
+
+// Lazy-loaded: these pull recharts + @xyflow (heavy viz libs). Static imports
+// here leak both libs into every page that touches the shared-components barrel
+// (login, landing, dashboard home). Loading them with next/dynamic keeps the
+// libs in their own async chunks, fetched only when the usage view renders.
+const ProviderTopology = dynamic(
+  () => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"),
+  { ssr: false, loading: () => <div className="min-h-[280px]" /> },
+);
+const UsageChart = dynamic(
+  () => import("@/app/(dashboard)/dashboard/usage/components/UsageChart"),
+  { ssr: false, loading: () => <div className="min-h-[300px]" /> },
+);
 
 function timeAgo(timestamp) {
   const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
