@@ -4,6 +4,8 @@
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
+import { selectModelOrder } from "./smartRouter/index.js";
+import { recordResult } from "./smartRouter/healthScore.js";
 
 /**
  * Track rotation state per combo (for round-robin strategy)
@@ -105,10 +107,19 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1 }) {
-  // Apply rotation strategy if enabled
-  const rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
-  
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, smartRouter }) {
+  // Smart router (opt-in): reorder by cost tier + health. OFF → byte-identical
+  // legacy rotation, and smart-router never touches comboRotationState.
+  const rotatedModels = smartRouter?.enabled
+    ? selectModelOrder({ models, body, comboName, comboStrategy, comboStickyLimit })
+    : getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
+
+  // Record an attempt outcome only when the feature is enabled (OFF path adds
+  // zero work). Health is keyed by the combo model string.
+  const recordHealth = (modelStr, ok) => {
+    if (smartRouter?.enabled) recordResult(modelStr, { ok });
+  };
+
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
@@ -122,6 +133,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       
       // Success (2xx) - return response
       if (result.ok) {
+        recordHealth(modelStr, true); // provider-attributable healthy outcome
         log.info("COMBO", `Model ${modelStr} succeeded`);
         return result;
       }
@@ -151,8 +163,19 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
 
       if (!shouldFallback) {
+        // Defensive: a future rule could opt a status out of fallback. Such a
+        // response is returned as-is and never recorded against health.
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
         return result;
+      }
+
+      // Record a failure against health ONLY for provider-attributable statuses
+      // (5xx server faults + 429 rate limit). Client errors (4xx) also fall
+      // through here — checkFallbackError returns shouldFallback:true for them —
+      // so they MUST be excluded by status, else a client 400 cascading through
+      // every combo model would tank every healthy provider's score.
+      if (result.status >= 500 || result.status === 429) {
+        recordHealth(modelStr, false);
       }
 
       // For transient errors (503/502/504), wait for cooldown before falling through
@@ -170,6 +193,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues
+      recordHealth(modelStr, false); // provider/network fault
       lastError = error.message || String(error);
       if (!lastStatus) lastStatus = 500;
       log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });

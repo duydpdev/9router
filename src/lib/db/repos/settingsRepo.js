@@ -59,12 +59,18 @@ const DEFAULT_SETTINGS = {
       reAlertHours: 4, // re-alert cadence while a key stays over
     },
   },
+  // Smart combo routing (opt-in). OFF → combo model order is byte-identical to
+  // the legacy static/round-robin behavior. ON → reorder per request by cost
+  // tier (provider auth type) then windowed provider health.
+  smartRouter: {
+    enabled: false,
+  },
 };
 
 // Keys whose default is a nested object with sub-defaults that must survive a
 // partial user override (shallow spread would clobber siblings). Only
 // botProtection needs this — the other object-valued keys are user-populated maps.
-const NESTED_DEFAULT_KEYS = ["botProtection"];
+const NESTED_DEFAULT_KEYS = ["botProtection", "smartRouter"];
 
 function isPlainObject(v) {
   return v != null && typeof v === "object" && !Array.isArray(v);
