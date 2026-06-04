@@ -1,14 +1,23 @@
 ---
-title: "Provider Auto Re-Login (refresh token death detection + 1-click reconnect)"
-description: "Detect dead refresh tokens, mark connections needsReauth, notify via warmup webhook, surface 1-click reconnect deep-link. Also fixes proactive refresh missing in tts/stt and adds mid-stream 401 retry-once across all stream handlers."
-status: pending
+title: Provider Auto Re-Login (refresh token death detection + 1-click reconnect)
+description: >-
+  Detect dead refresh tokens, mark connections needsReauth, notify via warmup
+  webhook, surface 1-click reconnect deep-link. Also fixes proactive refresh
+  missing in tts/stt and adds mid-stream 401 retry-once across all stream
+  handlers.
+status: completed
 priority: P2
-branch: "feature/dylan-improve"
-tags: ["oauth", "auth", "providers", "notifier", "reliability"]
+branch: feature/dylan-improve
+tags:
+  - oauth
+  - auth
+  - providers
+  - notifier
+  - reliability
 blockedBy: []
 blocks: []
-created: "2026-05-24T03:34:46.036Z"
-createdBy: "ck:plan"
+created: '2026-05-24T03:34:46.036Z'
+createdBy: 'ck:plan'
 source: skill
 ---
 
@@ -29,14 +38,14 @@ Approach: minimal reactive (no cron, no IdP creds, no headless browser). Detect 
 
 | Phase | Name                                                                                                  | Status  |
 | ----- | ----------------------------------------------------------------------------------------------------- | ------- |
-| 1     | [Foundation (schema + helpers)](./phase-01-foundation-schema-helpers.md)                              | Pending |
-| 2     | [Fix Case A (tts/stt refresh + mid-stream retry)](./phase-02-fix-case-a-tts-stt-refresh-mid-stream-retry.md) | Pending |
-| 3     | [Reauth notifier (bridge to warmup notifier)](./phase-03-reauth-notifier.md)                          | Pending |
-| 4     | [Mark + notify on refresh failure](./phase-04-mark-notify-on-refresh-failure.md)                      | Pending |
-| 5     | [Fallback skip needsReauth in getProviderCredentials](./phase-05-fallback-skip-needsreauth.md)        | Pending |
-| 6     | [UI deep-link reconnect + badge](./phase-06-ui-deep-link-reconnect.md)                                | Pending |
-| 7     | [OAuth callback clears flag + projectId re-fetch](./phase-07-oauth-callback-clear-flag-projectid.md)  | Pending |
-| 8     | [E2E smoke + docs/CHANGELOG](./phase-08-e2e-docs.md)                                                  | Pending |
+| 1     | [Foundation (schema + helpers)](./phase-01-foundation-schema-helpers.md)                              | Completed |
+| 2     | [Fix Case A (tts/stt refresh + mid-stream retry)](./phase-02-fix-case-a-tts-stt-refresh-mid-stream-retry.md) | Completed |
+| 3     | [Reauth notifier (bridge to warmup notifier)](./phase-03-reauth-notifier.md)                          | Completed |
+| 4     | [Mark + notify on refresh failure](./phase-04-mark-notify-on-refresh-failure.md)                      | Completed |
+| 5     | [Fallback skip needsReauth in getProviderCredentials](./phase-05-fallback-skip-needsreauth.md)        | Completed |
+| 6     | [UI deep-link reconnect + badge](./phase-06-ui-deep-link-reconnect.md)                                | Completed |
+| 7     | [OAuth callback clears flag + projectId re-fetch](./phase-07-oauth-callback-clear-flag-projectid.md)  | Completed |
+| 8     | [E2E smoke + docs/CHANGELOG](./phase-08-e2e-docs.md)                                                  | Completed |
 
 ## Dependencies
 
@@ -138,14 +147,14 @@ Each phase opens with a failing test or test-suite that pins the desired behavio
 
 | #  | Finding (deduped)                                                                                                      | Severity | Disposition | Applied To |
 |----|------------------------------------------------------------------------------------------------------------------------|----------|-------------|------------|
-| 1  | Wrong notifier ENV names (`DISCORD_WEBHOOK_URL`≠`WARMUP_NOTIFY_DISCORD_WEBHOOK`); nonexistent `postWebhook` export; `cfg.discord.webhookUrl`/`cfg.telegram.chatIds[]` mismatch; missing `cfg.enabled` gate | Critical | Accept | Phase 3, Phase 8, plan.md |
-| 2  | `getAccessToken` returns `null` for 9/12 providers (not `{error:"invalid_grant"}`); Codex returns `{error:"unrecoverable_refresh_error", code}` — classifier silent for most | Critical | Accept | Phase 4 |
-| 3  | Phase 7 "generic OAuth session store" doesn't exist for 9/12 providers — must use signed-state JWT instead              | Critical | Accept | Phase 7 |
-| 4  | `_refreshProjectId` NOT exported (plan falsely claims line 121) — Phase 7 import would throw                            | Critical | Accept | Phase 7 |
-| 5  | Phase 6 modifies `page.new.js` — Next.js routes to `page.js`; `page.new.js` is dead code (1724 LOC, 0 importers)        | Critical | Accept | Phase 6 |
-| 6  | `markReauthNotified` CAS is read+write across 2 statements — concurrent failures duplicate webhooks                      | High     | Accept | Phase 1 |
-| 7  | Phase 2 mid-stream 401-retry is duplicate work for image/embed/responses — already in their *Core handlers              | High     | Accept | Phase 2 |
-| 8  | Classifier returns `refresh_http_error` for any 4xx — marks transient outage (Google `temporarily_unavailable`, Auth0 burst 403, GitHub `secondary_rate_limit`) as fatal | High     | Accept | Phase 4 |
+| 1  | Wrong notifier ENV names (`DISCORD_WEBHOOK_URL`≠`WARMUP_NOTIFY_DISCORD_WEBHOOK`); nonexistent `postWebhook` export; `cfg.discord.webhookUrl`/`cfg.telegram.chatIds[]` mismatch; missing `cfg.enabled` gate | Critical | Accept | Completed |
+| 2  | `getAccessToken` returns `null` for 9/12 providers (not `{error:"invalid_grant"}`); Codex returns `{error:"unrecoverable_refresh_error", code}` — classifier silent for most | Critical | Accept | Completed |
+| 3  | Phase 7 "generic OAuth session store" doesn't exist for 9/12 providers — must use signed-state JWT instead              | Critical | Accept | Completed |
+| 4  | `_refreshProjectId` NOT exported (plan falsely claims line 121) — Phase 7 import would throw                            | Critical | Accept | Completed |
+| 5  | Phase 6 modifies `page.new.js` — Next.js routes to `page.js`; `page.new.js` is dead code (1724 LOC, 0 importers)        | Critical | Accept | Completed |
+| 6  | `markReauthNotified` CAS is read+write across 2 statements — concurrent failures duplicate webhooks                      | High     | Accept | Completed |
+| 7  | Phase 2 mid-stream 401-retry is duplicate work for image/embed/responses — already in their *Core handlers              | High     | Accept | Completed |
+| 8  | Classifier returns `refresh_http_error` for any 4xx — marks transient outage (Google `temporarily_unavailable`, Auth0 burst 403, GitHub `secondary_rate_limit`) as fatal | High     | Accept | Completed |
 | 9  | Cursor / GitLab PAT / Codex import / iFlow cookie have `refreshToken: null` — no OAuth refresh path; needs separate `manual_reimport_needed` UX | High     | Accept | Phase 6, plan.md |
 | 10 | Warmup builders hard-coded to warmup ctx — `kind === "reauth"` needs schema branch + Telegram MarkdownV2 URL escaping + `connectionName` sanitization | High     | Accept | Phase 3 |
 | 11 | Rate limiter shared between warmup + reauth — family-revoke burst saturates window, reauth dropped exactly when needed   | High     | Accept | Phase 3 |

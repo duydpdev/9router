@@ -1,10 +1,11 @@
 ---
 phase: 2
-title: "Silent-error triage"
-status: pending
+title: Silent-error triage
+status: completed
 priority: P1
-effort: "4-5h"
-dependencies: [1]
+effort: 4-5h
+dependencies:
+  - 1
 ---
 
 # Phase 2: Silent-error triage

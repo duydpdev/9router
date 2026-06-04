@@ -1,10 +1,11 @@
 ---
 phase: 6
-title: "Regression sweep + manual smoke"
-status: pending
+title: Regression sweep + manual smoke
+status: completed
 priority: P2
-effort: "1h"
-dependencies: [5]
+effort: 1h
+dependencies:
+  - 5
 ---
 
 # Phase 6: Regression sweep + manual smoke

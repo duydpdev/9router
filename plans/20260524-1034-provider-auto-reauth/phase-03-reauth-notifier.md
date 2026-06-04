@@ -1,10 +1,11 @@
 ---
 phase: 3
-title: "Reauth notifier (bridge to warmup notifier)"
-status: pending
+title: Reauth notifier (bridge to warmup notifier)
+status: completed
 priority: P1
-effort: "3-4h"
-dependencies: [1]
+effort: 3-4h
+dependencies:
+  - 1
 ---
 
 # Phase 3: Reauth notifier — bridge to existing warmup notifier

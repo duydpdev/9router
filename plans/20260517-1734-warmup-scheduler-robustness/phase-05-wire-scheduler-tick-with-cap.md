@@ -1,10 +1,14 @@
 ---
 phase: 5
-title: "Wire scheduler (persist-before-run, await init, gate manual, status-aware dedupe)"
-status: pending
+title: >-
+  Wire scheduler (persist-before-run, await init, gate manual, status-aware
+  dedupe)
+status: completed
 priority: P1
-effort: "1.5h"
-dependencies: [3, 4]
+effort: 1.5h
+dependencies:
+  - 3
+  - 4
 ---
 
 # Phase 5: Wire scheduler tick with catch-up

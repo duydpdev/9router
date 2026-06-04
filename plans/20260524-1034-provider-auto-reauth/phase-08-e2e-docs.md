@@ -1,10 +1,17 @@
 ---
 phase: 8
-title: "E2E smoke + docs / CHANGELOG"
-status: pending
+title: E2E smoke + docs / CHANGELOG
+status: completed
 priority: P2
-effort: "3-4h"
-dependencies: [1, 2, 3, 4, 5, 6, 7]
+effort: 3-4h
+dependencies:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
 ---
 
 # Phase 8: End-to-end smoke + docs

@@ -1,10 +1,13 @@
 ---
 phase: 4
-title: "Mark + notify on refresh failure"
-status: pending
+title: Mark + notify on refresh failure
+status: completed
 priority: P1
-effort: "3-4h"
-dependencies: [1, 2, 3]
+effort: 3-4h
+dependencies:
+  - 1
+  - 2
+  - 3
 ---
 
 # Phase 4: Mark + notify on refresh failure (Case B detection)

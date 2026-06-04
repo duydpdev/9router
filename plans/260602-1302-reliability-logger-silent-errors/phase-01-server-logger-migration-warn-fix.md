@@ -1,9 +1,9 @@
 ---
 phase: 1
-title: "Server logger migration + warn() fix"
-status: pending
+title: Server logger migration + warn() fix
+status: completed
 priority: P1
-effort: "3-4h"
+effort: 3-4h
 dependencies: []
 ---
 

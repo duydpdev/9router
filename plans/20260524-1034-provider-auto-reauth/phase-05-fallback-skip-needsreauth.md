@@ -1,10 +1,11 @@
 ---
 phase: 5
-title: "Fallback skip needsReauth in getProviderCredentials"
-status: pending
+title: Fallback skip needsReauth in getProviderCredentials
+status: completed
 priority: P1
-effort: "2-3h"
-dependencies: [1]
+effort: 2-3h
+dependencies:
+  - 1
 ---
 
 # Phase 5: Combo fallback skip needsReauth connections

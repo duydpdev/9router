@@ -1,10 +1,11 @@
 ---
 phase: 2
-title: "Tests for findDueWarmupRunsInRange + isolated test DB infra"
-status: pending
+title: Tests for findDueWarmupRunsInRange + isolated test DB infra
+status: completed
 priority: P2
-effort: "1h"
-dependencies: [1]
+effort: 1h
+dependencies:
+  - 1
 ---
 
 # Phase 2: Tests for findDueWarmupRunsInRange + isolated test DB

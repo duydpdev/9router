@@ -1,10 +1,12 @@
 ---
 phase: 6
-title: "UI deep-link reconnect + needsReauth badge"
-status: pending
+title: UI deep-link reconnect + needsReauth badge
+status: completed
 priority: P2
-effort: "4-6h"
-dependencies: [1, 5]
+effort: 4-6h
+dependencies:
+  - 1
+  - 5
 ---
 
 # Phase 6: UI — needsReauth badge + deep-link reconnect

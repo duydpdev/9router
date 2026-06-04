@@ -1,14 +1,14 @@
 ---
-title: "Warmup Scheduler Robustness (Catch-up + Persistence)"
-description: ""
-status: pending
+title: Warmup Scheduler Robustness (Catch-up + Persistence)
+description: ''
+status: completed
 priority: P2
-branch: "feature/dylan-improve"
+branch: feature/dylan-improve
 tags: []
 blockedBy: []
 blocks: []
-created: "2026-05-17T10:35:54.378Z"
-createdBy: "ck:plan"
+created: '2026-05-17T10:35:54.378Z'
+createdBy: 'ck:plan'
 source: skill
 ---
 
@@ -39,12 +39,12 @@ Make warmup scheduler tolerant of process restart and downtime. Backward-window 
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Storage refactor: warmup_runs + warmup_dedupe tables](./phase-01-tests-for-findduewarmuprunsinrange.md) | Pending |
-| 2 | [Tests for findDueWarmupRunsInRange (isolated DB)](./phase-02-tests-for-persisted-lasttickat.md) | Pending |
-| 3 | [Implement findDueWarmupRunsInRange (UTC :00 only, shared ceilToHour)](./phase-03-implement-range-scan.md) | Pending |
-| 4 | [Implement lastTickAt persistence (makeKv + monotonic + tests)](./phase-04-implement-lasttickat-persistence.md) | Pending |
-| 5 | [Wire scheduler (persist-before, await init, gate manual, status-aware dedupe)](./phase-05-wire-scheduler-tick-with-cap.md) | Pending |
-| 6 | [Regression sweep + manual smoke](./phase-06-regression-sweep.md) | Pending |
+| 1 | [Storage refactor: warmup_runs + warmup_dedupe tables](./phase-01-tests-for-findduewarmuprunsinrange.md) | Completed |
+| 2 | [Tests for findDueWarmupRunsInRange (isolated DB)](./phase-02-tests-for-persisted-lasttickat.md) | Completed |
+| 3 | [Implement findDueWarmupRunsInRange (UTC :00 only, shared ceilToHour)](./phase-03-implement-range-scan.md) | Completed |
+| 4 | [Implement lastTickAt persistence (makeKv + monotonic + tests)](./phase-04-implement-lasttickat-persistence.md) | Completed |
+| 5 | [Wire scheduler (persist-before, await init, gate manual, status-aware dedupe)](./phase-05-wire-scheduler-tick-with-cap.md) | Completed |
+| 6 | [Regression sweep + manual smoke](./phase-06-regression-sweep.md) | Completed |
 
 ## Dependencies
 
@@ -60,12 +60,12 @@ Make warmup scheduler tolerant of process restart and downtime. Backward-window 
 
 | # | Finding | Severity | Disposition | Applied To |
 |---|---|---|---|---|
-| 1 | 30-min iteration is wrong; `getLocalSlot` floors minute, UTC `:00` is sufficient | Critical | Accept | Phase 3 |
-| 2 | MAX_RUN_HISTORY=100 evicts dedupe entries during multi-schedule catch-up | Critical | Accept | Phase 1 (new prereq) |
-| 3 | Phase 2 tests would write to user's real `~/.9router/db/data.sqlite` | Critical | Accept | Phase 2 |
-| 4 | Manual `/api/warmup/run` + scheduler catch-up race on `appendWarmupRun` | Critical | Accept | Phase 5 |
-| 5 | Failed runs permanently poison dedupe (`hasWarmupRun` is status-agnostic) | High | Accept | Phase 1 |
-| 6 | `lastTickAt` advances even when all items failed → missed slots lost | High | Accept | Phase 5 |
+| 1 | 30-min iteration is wrong; `getLocalSlot` floors minute, UTC `:00` is sufficient | Critical | Accept | Completed |
+| 2 | MAX_RUN_HISTORY=100 evicts dedupe entries during multi-schedule catch-up | Critical | Accept | Completed |
+| 3 | Phase 2 tests would write to user's real `~/.9router/db/data.sqlite` | Critical | Accept | Completed |
+| 4 | Manual `/api/warmup/run` + scheduler catch-up race on `appendWarmupRun` | Critical | Accept | Completed |
+| 5 | Failed runs permanently poison dedupe (`hasWarmupRun` is status-agnostic) | High | Accept | Completed |
+| 6 | `lastTickAt` advances even when all items failed → missed slots lost | High | Accept | Completed |
 | 7 | Crash-loop persist timing: brainstorm says "persist immediately", sketch persists after | High | Accept | Phase 5 |
 | 8 | Initial-tick race with SQLite migrations + stale `now` snapshot | High | Accept | Phase 5 |
 | 9 | `appendWarmupRunToDb` O(n²) amplified by catch-up — must fix in this round | High | Accept | Phase 1 |

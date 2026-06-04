@@ -1,10 +1,12 @@
 ---
 phase: 4
-title: "lastTickAt persistence via makeKv + monotonic guard + tests"
-status: pending
+title: lastTickAt persistence via makeKv + monotonic guard + tests
+status: completed
 priority: P2
-effort: "0.5h"
-dependencies: [1, 2]
+effort: 0.5h
+dependencies:
+  - 1
+  - 2
 ---
 
 # Phase 4: lastTickAt persistence

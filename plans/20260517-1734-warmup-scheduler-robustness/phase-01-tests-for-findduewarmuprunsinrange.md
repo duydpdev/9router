@@ -1,9 +1,9 @@
 ---
 phase: 1
-title: "Storage refactor: warmup_runs + warmup_dedupe tables"
-status: pending
+title: 'Storage refactor: warmup_runs + warmup_dedupe tables'
+status: completed
 priority: P1
-effort: "1.5h"
+effort: 1.5h
 dependencies: []
 ---
 

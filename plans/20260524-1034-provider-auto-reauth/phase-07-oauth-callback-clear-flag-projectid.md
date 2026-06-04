@@ -1,10 +1,12 @@
 ---
 phase: 7
-title: "OAuth callback clears flag + projectId re-fetch"
-status: pending
+title: OAuth callback clears flag + projectId re-fetch
+status: completed
 priority: P1
-effort: "3-4h"
-dependencies: [1, 6]
+effort: 3-4h
+dependencies:
+  - 1
+  - 6
 ---
 
 # Phase 7: OAuth callback clears needsReauth + projectId re-fetch

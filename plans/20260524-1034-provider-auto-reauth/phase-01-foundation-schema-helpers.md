@@ -1,9 +1,9 @@
 ---
 phase: 1
-title: "Foundation (schema + helpers)"
-status: pending
+title: Foundation (schema + helpers)
+status: completed
 priority: P1
-effort: "3-4h"
+effort: 3-4h
 dependencies: []
 ---
 

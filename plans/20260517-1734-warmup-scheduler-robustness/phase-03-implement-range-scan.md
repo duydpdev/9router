@@ -1,10 +1,11 @@
 ---
 phase: 3
-title: "Implement findDueWarmupRunsInRange (UTC :00 only, shared ceilToHour)"
-status: pending
+title: 'Implement findDueWarmupRunsInRange (UTC :00 only, shared ceilToHour)'
+status: completed
 priority: P2
-effort: "0.5h"
-dependencies: [2]
+effort: 0.5h
+dependencies:
+  - 2
 ---
 
 # Phase 3: Implement findDueWarmupRunsInRange

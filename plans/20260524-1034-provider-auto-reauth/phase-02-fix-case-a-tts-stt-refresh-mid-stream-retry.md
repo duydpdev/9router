@@ -1,10 +1,11 @@
 ---
 phase: 2
-title: "Fix Case A — tts/stt proactive refresh + mid-stream 401 retry-once"
-status: pending
+title: Fix Case A — tts/stt proactive refresh + mid-stream 401 retry-once
+status: completed
 priority: P1
-effort: "4-6h"
-dependencies: [1]
+effort: 4-6h
+dependencies:
+  - 1
 ---
 
 # Phase 2: Fix Case A — tts/stt refresh + mid-stream 401 retry-once

@@ -1,10 +1,12 @@
 ---
 phase: 3
-title: "Verify"
-status: pending
+title: Verify
+status: completed
 priority: P1
-effort: "1-2h"
-dependencies: [1, 2]
+effort: 1-2h
+dependencies:
+  - 1
+  - 2
 ---
 
 # Phase 3: Verify

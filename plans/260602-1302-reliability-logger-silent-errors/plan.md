@@ -1,14 +1,23 @@
 ---
-title: "Reliability: server logger migration + silent-error triage"
-description: "Stop regressions via observability: migrate server-side console.log hotspots to the env-gated logger, fix the no-op warn(), and triage silent empty-catch blocks. Additive (logging only), low risk. God-files/CI/test-fixes OUT of scope."
-status: pending
+title: 'Reliability: server logger migration + silent-error triage'
+description: >-
+  Stop regressions via observability: migrate server-side console.log hotspots
+  to the env-gated logger, fix the no-op warn(), and triage silent empty-catch
+  blocks. Additive (logging only), low risk. God-files/CI/test-fixes OUT of
+  scope.
+status: completed
 priority: P2
-branch: "feat/implement-sercurity"
-tags: [reliability, logging, observability, refactor, debt]
+branch: feat/implement-sercurity
+tags:
+  - reliability
+  - logging
+  - observability
+  - refactor
+  - debt
 blockedBy: []
 blocks: []
-created: "2026-06-02T06:20:45.412Z"
-createdBy: "ck:plan"
+created: '2026-06-02T06:20:45.412Z'
+createdBy: 'ck:plan'
 source: skill
 ---
 
@@ -31,9 +40,9 @@ Source design: [brainstorm-260602-1302-reliability-logger-silent-errors.md](../r
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Server logger migration + warn() fix](./phase-01-server-logger-migration-warn-fix.md) | Pending |
-| 2 | [Silent-error triage](./phase-02-silent-error-triage.md) | Pending |
-| 3 | [Verify](./phase-03-verify.md) | Pending |
+| 1 | [Server logger migration + warn() fix](./phase-01-server-logger-migration-warn-fix.md) | Completed |
+| 2 | [Silent-error triage](./phase-02-silent-error-triage.md) | Completed |
+| 3 | [Verify](./phase-03-verify.md) | Completed |
 
 ## Key Decisions
 
